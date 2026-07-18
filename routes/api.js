@@ -1,7 +1,7 @@
 // routes/api.js  -  Endpoints REST de solo lectura (por ahora) contra Biblioteca_Quito.
 const express = require('express');
 const router = express.Router();
-const { getPool } = require('../db');
+const { sql, getPool } = require('../db');
 
 // Helper: ejecuta una consulta y devuelve el arreglo de filas como JSON.
 async function consultar(res, sqlText) {
@@ -84,6 +84,58 @@ router.get('/auditoria', async (req, res) => {
   } catch (err) {
     console.error('Error auditoria:', err.message);
     res.status(500).json({ error: 'Error de base de datos', detalle: err.message });
+  }
+});
+
+// ===== CRUD de EJEMPLAR_Identificacion (fragmentación vertical, local Quito) =====
+
+// CREAR
+router.post('/ejemplares-identificacion', async (req, res) => {
+  const { id_libro, nro_ejemplar, codigo_ejemplar } = req.body;
+  try {
+    const pool = await getPool();
+    await pool.request()
+      .input('id_libro', sql.Int, id_libro)
+      .input('nro_ejemplar', sql.Int, nro_ejemplar)
+      .input('codigo_ejemplar', sql.VarChar(100), codigo_ejemplar)
+      .query(`INSERT INTO EJEMPLAR_Identificacion (id_libro, nro_ejemplar, codigo_ejemplar)
+              VALUES (@id_libro, @nro_ejemplar, @codigo_ejemplar)`);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ACTUALIZAR (el código de un ejemplar existente)
+router.put('/ejemplares-identificacion', async (req, res) => {
+  const { id_libro, nro_ejemplar, codigo_ejemplar } = req.body;
+  try {
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('id_libro', sql.Int, id_libro)
+      .input('nro_ejemplar', sql.Int, nro_ejemplar)
+      .input('codigo_ejemplar', sql.VarChar(100), codigo_ejemplar)
+      .query(`UPDATE EJEMPLAR_Identificacion SET codigo_ejemplar = @codigo_ejemplar
+              WHERE id_libro = @id_libro AND nro_ejemplar = @nro_ejemplar`);
+    res.json({ ok: true, filas: r.rowsAffected[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ELIMINAR
+router.delete('/ejemplares-identificacion', async (req, res) => {
+  const { id_libro, nro_ejemplar } = req.body;
+  try {
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('id_libro', sql.Int, id_libro)
+      .input('nro_ejemplar', sql.Int, nro_ejemplar)
+      .query(`DELETE FROM EJEMPLAR_Identificacion
+              WHERE id_libro = @id_libro AND nro_ejemplar = @nro_ejemplar`);
+    res.json({ ok: true, filas: r.rowsAffected[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

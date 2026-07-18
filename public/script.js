@@ -11,6 +11,18 @@ async function apiGet(path) {
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
 }
+// Envia datos al backend (POST/PUT/DELETE) con cuerpo JSON.
+async function apiSend(path, method, body) {
+  const r = await fetch('/api' + path, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+  return data;
+}
+
 // Aviso reutilizable cuando el nodo Guayaquil aun no esta conectado.
 function guardGuayaquil() {
   return state.node === 'Guayaquil'
@@ -297,32 +309,77 @@ async function ejemplarIdentificacion() {
   let tablaIdent;
   try {
     const data = await apiGet('/ejemplares-identificacion');
-    const rows = data.map(e => [
-      e.id_libro,
-      e.nro_ejemplar,
-      e.codigo_ejemplar,
-      'Editar / Eliminar'
-    ]);
+    const rows = data.map(e => [e.id_libro, e.nro_ejemplar, e.codigo_ejemplar]);
     tablaIdent = rows.length
-      ? table(['ID libro', 'Nro. ejemplar', 'Código ejemplar', 'Acciones'], rows)
+      ? table(['ID libro', 'Nro. ejemplar', 'Código ejemplar'], rows)
       : errorBox('No hay ejemplares identificados registrados.');
   } catch (err) {
-    tablaIdent = errorBox('No se pudo conectar con el servidor. Verifica que el backend esté corriendo (npm start).');
+    tablaIdent = errorBox('No se pudo conectar con el servidor.');
   }
 
   const content = `
-    ${pageHeader('06 · Identificación de ejemplares', 'Identificación física de ejemplares', 'Registra el código físico o de inventario de cada ejemplar disponible en la biblioteca.')}
-    <div class="note">Este inventario de identificación está centralizado en Quito e incluye los ejemplares de ambas sedes.</div><br />
+    ${pageHeader('06 · Identificación de ejemplares', 'Identificación física de ejemplares', 'Registra el código físico o de inventario de cada ejemplar.')}
+    <div class="note">Este inventario está centralizado en Quito e incluye los ejemplares de ambas sedes.</div><br />
     <div class="layout-with-aside">
       <div class="grid">
-        <div class="card"><div class="form-grid">${field('ID libro')}${field('Nro. ejemplar')}${field('Código ejemplar', 'Q-BD-101-001')}</div>${actions(['Registrar identificación','Editar código','Eliminar','Buscar'])}</div>
+        <div class="card">
+          <div class="form-grid">
+            <div class="field"><label>ID libro</label><input class="input" id="ident_id_libro" type="number" placeholder="Ej. 1" /></div>
+            <div class="field"><label>Nro. ejemplar</label><input class="input" id="ident_nro" type="number" placeholder="Ej. 1" /></div>
+            <div class="field"><label>Código ejemplar</label><input class="input" id="ident_codigo" type="text" placeholder="Ej. Q-BD-101-001" /></div>
+          </div>
+          <div class="actions">
+            <button class="btn btn-primary" onclick="crearIdentificacion()">Registrar</button>
+            <button class="btn btn-secondary" onclick="editarIdentificacion()">Actualizar código</button>
+            <button class="btn btn-secondary" onclick="eliminarIdentificacion()">Eliminar</button>
+          </div>
+          <div id="ident_msg" class="help"></div>
+        </div>
         ${tablaIdent}
       </div>
       ${techCard([
-        ['Nodo:', 'Quito'], ['Tabla:', 'EJEMPLAR_Identificacion'], ['Tipo de fragmentación:', 'Fragmentación vertical'], ['Ubicación:', 'Quito (centralizada)'], ['Función:', 'Identificación física general de ejemplares'], ['Operaciones:', 'Registrar, consultar, editar y eliminar códigos físicos de ejemplares']
+        ['Nodo:', 'Quito'], ['Tabla:', 'EJEMPLAR_Identificacion'], ['Tipo de fragmentación:', 'Fragmentación vertical'], ['Ubicación:', 'Quito (centralizada)'], ['Operaciones:', 'Crear, consultar, actualizar y eliminar códigos físicos']
       ])}
     </div>`;
   return shell(content, 'ejemplares-identificacion');
+}
+
+// --- Manejadores del CRUD de Identificación ---
+function leerIdent() {
+  return {
+    id_libro: parseInt(document.getElementById('ident_id_libro').value, 10),
+    nro_ejemplar: parseInt(document.getElementById('ident_nro').value, 10),
+    codigo_ejemplar: document.getElementById('ident_codigo').value.trim()
+  };
+}
+function msgIdent(texto, ok = true) {
+  const el = document.getElementById('ident_msg');
+  if (el) { el.textContent = texto; el.style.color = ok ? 'seagreen' : 'crimson'; }
+}
+async function crearIdentificacion() {
+  const d = leerIdent();
+  if (!d.id_libro || !d.nro_ejemplar || !d.codigo_ejemplar) return msgIdent('Completa los tres campos.', false);
+  try { await apiSend('/ejemplares-identificacion', 'POST', d); await render(); }
+  catch (err) { msgIdent('Error: ' + err.message, false); }
+}
+async function editarIdentificacion() {
+  const d = leerIdent();
+  if (!d.id_libro || !d.nro_ejemplar || !d.codigo_ejemplar) return msgIdent('Completa ID libro, Nro. y el nuevo código.', false);
+  try {
+    const r = await apiSend('/ejemplares-identificacion', 'PUT', d);
+    if (r.filas === 0) return msgIdent('No existe ese ejemplar para actualizar.', false);
+    await render();
+  } catch (err) { msgIdent('Error: ' + err.message, false); }
+}
+async function eliminarIdentificacion() {
+  const d = leerIdent();
+  if (!d.id_libro || !d.nro_ejemplar) return msgIdent('Indica ID libro y Nro. ejemplar.', false);
+  if (!confirm('¿Eliminar el ejemplar ' + d.id_libro + '-' + d.nro_ejemplar + '?')) return;
+  try {
+    const r = await apiSend('/ejemplares-identificacion', 'DELETE', d);
+    if (r.filas === 0) return msgIdent('No existe ese ejemplar para eliminar.', false);
+    await render();
+  } catch (err) { msgIdent('Error: ' + err.message, false); }
 }
 
 async function ejemplarOperacion() {
