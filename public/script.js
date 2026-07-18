@@ -180,50 +180,96 @@ async function dashboard() {
 // ===== PANTALLA CONECTADA A LA API: Sedes y Libros =====
 async function sedeLibro() {
   const readonly = state.node === 'Guayaquil';
-  const note = readonly ? 'En Guayaquil esta sección funciona en modo consulta para visualizar sedes y catálogo.' : 'En Quito se administra la información de sedes y libros del catálogo.';
-
-  // Traer datos reales desde el backend
   let sedeTable, libroTable;
   try {
     const [sedes, libros] = await Promise.all([apiGet('/sedes'), apiGet('/libros')]);
-    const sedeRows = sedes.map(s => [s.id_sede, s.nombre, s.ciudad, readonly ? 'Consultar' : 'Editar / Eliminar']);
-    const libroRows = libros.map(l => [l.id_libro, l.titulo, l.autor, l.categoria, readonly ? 'Consultar' : 'Editar / Eliminar']);
-    sedeTable = table(['ID sede','Nombre','Ciudad','Acciones'], sedeRows);
-    libroTable = table(['ID libro','Título','Autor','Categoría','Acciones'], libroRows);
+    sedeTable = table(['ID sede','Nombre','Ciudad'], sedes.map(s => [s.id_sede, s.nombre, s.ciudad]));
+    libroTable = table(['ID libro','Título','Autor','Categoría'], libros.map(l => [l.id_libro, l.titulo, l.autor, l.categoria]));
   } catch (err) {
-    const aviso = errorBox('No se pudo conectar con el servidor. Verifica que el backend esté corriendo (npm start) y que la conexión a SQL Server sea correcta.');
-    sedeTable = aviso;
+    sedeTable = errorBox('No se pudo conectar con el servidor.');
     libroTable = '';
   }
 
+  // En Guayaquil: solo lectura (replicado). En Quito: botones activos.
+  const botonesLibro = readonly
+    ? '<div class="note">En Guayaquil, LIBRO es de solo lectura (llega por replicación desde Quito).</div>'
+    : `<div class="actions">
+        <button class="btn btn-primary" onclick="crearLibro()">Registrar</button>
+        <button class="btn btn-secondary" onclick="editarLibro()">Actualizar</button>
+        <button class="btn btn-secondary" onclick="eliminarLibro()">Eliminar</button>
+      </div><div id="libro_msg" class="help"></div>`;
+      const botonesSede = '<div class="note">SEDE es una tabla de catálogo fija del sistema: solo Quito(1) y Guayaquil(2). Se muestra en modo consulta.</div>';
+
   const content = `
-    ${pageHeader('03 · Sedes y Libros', 'Sedes y catálogo', 'Administra la información de las sedes de la biblioteca y el catálogo general de libros.')}
+    ${pageHeader('03 · Sedes y Libros', 'Sedes y catálogo', 'Administra las sedes y el catálogo general de libros.')}
     ${guardGuayaquil()}
-    <div class="note">${note}</div><br />
+    <div class="note">Estas tablas se replican desde Quito hacia Guayaquil. La escritura ocurre en Quito; Guayaquil las consulta.</div><br />
     <div class="layout-with-aside">
       <div class="grid">
         <div class="card">
-          <div class="tabs"><button class="tab active">SEDE</button><button class="tab">LIBRO</button></div>
+          <div class="section-title">LIBRO</div>
           <div class="form-grid">
-            ${field('ID sede', '1')}${field('Nombre', 'Biblioteca Quito')}${field('Ciudad', state.node)}
+            <div class="field"><label>ID libro <small>(solo para actualizar/eliminar)</small></label><input class="input" id="libro_id" type="number" placeholder="Automático al crear" /></div>
+            <div class="field"><label>Título</label><input class="input" id="libro_titulo" type="text" placeholder="Título" /></div>
+            <div class="field"><label>Autor</label><input class="input" id="libro_autor" type="text" placeholder="Autor" /></div>
+            <div class="field"><label>Categoría</label><input class="input" id="libro_categoria" type="text" placeholder="Categoría" /></div>
           </div>
-          ${actions(['Nuevo', 'Editar', 'Eliminar', 'Buscar', 'Guardar', 'Cancelar'])}
-        </div>
-        ${sedeTable}
-        <div class="card">
-          <div class="form-grid">
-            ${field('ID libro', '101')}${field('Título', 'Fundamentos de Bases de Datos')}${field('Autor', 'Silberschatz')}${field('Categoría', 'Base de Datos')}
-          </div>
-          ${actions(['Nuevo', 'Editar', 'Eliminar', 'Buscar', 'Guardar', 'Cancelar'])}
+          ${botonesLibro}
         </div>
         ${libroTable}
+        <div class="card">
+          <div class="section-title">SEDE</div>
+          ${botonesSede}
+        </div>
+        ${sedeTable}
       </div>
       ${techCard([
-        ['Nodo:', 'Quito maestro / Guayaquil suscriptor'], ['Tabla:', 'SEDE y LIBRO'], ['Tipo de fragmentación:', 'Replicación transaccional'], ['Operaciones:', 'Crear, consultar, actualizar y eliminar en Quito. Solo consulta en Guayaquil.']
+        ['Nodo:', 'Quito maestro / Guayaquil suscriptor'], ['Tabla:', 'SEDE y LIBRO'], ['Tipo de fragmentación:', 'Replicación transaccional'], ['Operaciones:', 'CRUD en Quito. Solo consulta en Guayaquil.']
       ])}
     </div>`;
   return shell(content, 'sede-libro');
 }
+
+// --- CRUD LIBRO ---
+function leerLibro() {
+  return {
+    id_libro: parseInt(document.getElementById('libro_id').value, 10),
+    titulo: document.getElementById('libro_titulo').value.trim(),
+    autor: document.getElementById('libro_autor').value.trim(),
+    categoria: document.getElementById('libro_categoria').value.trim()
+  };
+}
+function msgLibro(t, ok=true){ const e=document.getElementById('libro_msg'); if(e){e.textContent=t; e.style.color=ok?'seagreen':'crimson';} }
+async function crearLibro(){
+  const d = leerLibro();
+  if(!d.titulo) return msgLibro('El Título es obligatorio.', false);
+  try{
+    const r = await apiSend('/libros','POST',{ titulo:d.titulo, autor:d.autor, categoria:d.categoria });
+    await render();
+  }catch(e){ msgLibro('Error: '+e.message, false); }
+}
+async function editarLibro(){ const d=leerLibro(); if(!d.id_libro) return msgLibro('Indica el ID libro a actualizar.',false);
+  try{ const r=await apiSend('/libros','PUT',d); if(r.filas===0) return msgLibro('No existe ese libro.',false); await render(); }catch(e){ msgLibro('Error: '+e.message,false); } }
+async function eliminarLibro(){ const d=leerLibro(); if(!d.id_libro) return msgLibro('Indica el ID libro a eliminar.',false);
+  if(!confirm('¿Eliminar el libro '+d.id_libro+'?')) return;
+  try{ const r=await apiSend('/libros','DELETE',{id_libro:d.id_libro}); if(r.filas===0) return msgLibro('No existe ese libro.',false); await render(); }catch(e){ msgLibro('Error: '+e.message,false); } }
+
+// --- CRUD SEDE ---
+function leerSede() {
+  return {
+    id_sede: parseInt(document.getElementById('sede_id').value, 10),
+    nombre: document.getElementById('sede_nombre').value.trim(),
+    ciudad: document.getElementById('sede_ciudad').value.trim()
+  };
+}
+function msgSede(t, ok=true){ const e=document.getElementById('sede_msg'); if(e){e.textContent=t; e.style.color=ok?'seagreen':'crimson';} }
+async function crearSede(){ const d=leerSede(); if(!d.id_sede||!d.nombre) return msgSede('ID sede y Nombre son obligatorios.',false);
+  try{ await apiSend('/sedes','POST',d); await render(); }catch(e){ msgSede('Error: '+e.message,false); } }
+async function editarSede(){ const d=leerSede(); if(!d.id_sede) return msgSede('Indica el ID sede a actualizar.',false);
+  try{ const r=await apiSend('/sedes','PUT',d); if(r.filas===0) return msgSede('No existe esa sede.',false); await render(); }catch(e){ msgSede('Error: '+e.message,false); } }
+async function eliminarSede(){ const d=leerSede(); if(!d.id_sede) return msgSede('Indica el ID sede a eliminar.',false);
+  if(!confirm('¿Eliminar la sede '+d.id_sede+'?')) return;
+  try{ const r=await apiSend('/sedes','DELETE',{id_sede:d.id_sede}); if(r.filas===0) return msgSede('No existe esa sede.',false); await render(); }catch(e){ msgSede('Error: '+e.message,false); } }
 
 // ===== PANTALLA CONECTADA A LA API: Estudiantes =====
 async function estudiantes() {

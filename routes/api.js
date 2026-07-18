@@ -139,4 +139,84 @@ router.delete('/ejemplares-identificacion', async (req, res) => {
   }
 });
 
+// ===== CRUD de LIBRO (replicado: solo se escribe en Quito) =====
+router.post('/libros', async (req, res) => {
+  const { titulo, autor, categoria } = req.body;
+  try {
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('titulo', sql.VarChar(200), titulo)
+      .input('autor', sql.VarChar(150), autor)
+      .input('categoria', sql.VarChar(100), categoria)
+      .query(`INSERT INTO LIBRO (titulo, autor, categoria)
+              OUTPUT INSERTED.id_libro
+              VALUES (@titulo, @autor, @categoria)`);
+    res.json({ ok: true, id_libro: r.recordset[0].id_libro });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.put('/libros', async (req, res) => {
+  const { id_libro, titulo, autor, categoria } = req.body;
+  try {
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('id_libro', sql.Int, id_libro)
+      .input('titulo', sql.VarChar(200), titulo)
+      .input('autor', sql.VarChar(150), autor)
+      .input('categoria', sql.VarChar(100), categoria)
+      .query(`UPDATE LIBRO SET titulo=@titulo, autor=@autor, categoria=@categoria
+              WHERE id_libro=@id_libro`);
+    res.json({ ok: true, filas: r.rowsAffected[0] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete('/libros', async (req, res) => {
+  const { id_libro } = req.body;
+  try {
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('id_libro', sql.Int, id_libro)
+      .query(`DELETE FROM LIBRO WHERE id_libro=@id_libro`);
+    res.json({ ok: true, filas: r.rowsAffected[0] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ===== CRUD de SEDE (replicado: solo se escribe en Quito) =====
+router.post('/sedes', async (req, res) => {
+  const { id_sede, nombre, ciudad } = req.body;
+  try {
+    const pool = await getPool();
+    await pool.request()
+      .input('id_sede', sql.Int, id_sede)
+      .input('nombre', sql.VarChar(150), nombre)
+      .input('ciudad', sql.VarChar(100), ciudad)
+      .query(`INSERT INTO SEDE (id_sede, nombre, ciudad) VALUES (@id_sede, @nombre, @ciudad)`);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.put('/sedes', async (req, res) => {
+  const { id_sede, nombre, ciudad } = req.body;
+  try {
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('id_sede', sql.Int, id_sede)
+      .input('nombre', sql.VarChar(150), nombre)
+      .input('ciudad', sql.VarChar(100), ciudad)
+      .query(`UPDATE SEDE SET nombre=@nombre, ciudad=@ciudad WHERE id_sede=@id_sede`);
+    res.json({ ok: true, filas: r.rowsAffected[0] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete('/sedes', async (req, res) => {
+  const { id_sede } = req.body;
+  try {
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('id_sede', sql.Int, id_sede)
+      .query(`DELETE FROM SEDE WHERE id_sede=@id_sede`);
+    res.json({ ok: true, filas: r.rowsAffected[0] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 module.exports = router;
