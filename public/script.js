@@ -273,40 +273,70 @@ async function eliminarSede(){ const d=leerSede(); if(!d.id_sede) return msgSede
 
 // ===== PANTALLA CONECTADA A LA API: Estudiantes =====
 async function estudiantes() {
-  let tablaEstudiantes;
+  let tabla;
   try {
     const data = await apiGet('/estudiantes');
-    const rows = data.map(e => [
-      e.id_estudiante, e.nombre, e.carrera, e.correo,
-      e.id_sede === 1 ? 'Quito' : 'Guayaquil',
-      'Editar / Eliminar'
-    ]);
-    tablaEstudiantes = rows.length
-      ? table(['ID estudiante','Nombre','Carrera','Correo','Sede','Acciones'], rows)
-      : errorBox('No hay estudiantes registrados en este nodo.');
-  } catch (err) {
-    tablaEstudiantes = errorBox('No se pudo conectar con el servidor. Verifica que el backend esté corriendo (npm start).');
-  }
+    const rows = data.map(e => [e.id_estudiante, e.nombre, e.carrera, e.correo, e.id_sede === 1 ? 'Quito' : 'Guayaquil']);
+    tabla = rows.length ? table(['ID','Nombre','Carrera','Correo','Sede'], rows) : errorBox('No hay estudiantes en este nodo.');
+  } catch (err) { tabla = errorBox('No se pudo conectar con el servidor.'); }
 
   const content = `
-    ${pageHeader('04 · Estudiantes', 'Gestión de estudiantes', 'Registra, consulta y actualiza la información de los estudiantes asociados a la sede seleccionada.')}
+    ${pageHeader('04 · Estudiantes', 'Gestión de estudiantes', 'Registra, consulta y actualiza los estudiantes de la sede local.')}
     ${guardGuayaquil()}
     <div class="layout-with-aside">
       <div class="grid">
         <div class="card">
           <div class="form-grid">
-            ${field('ID estudiante')}${field('Nombre')}${field('Carrera')}${field('Correo')}${field('Sede', state.node, 'text', true)}
+            <div class="field"><label>ID estudiante <small>(solo para actualizar/eliminar)</small></label><input class="input" id="est_id" type="number" placeholder="Automático al crear" /></div>
+            <div class="field"><label>Nombre</label><input class="input" id="est_nombre" type="text" placeholder="Nombre completo" /></div>
+            <div class="field"><label>Carrera</label><input class="input" id="est_carrera" type="text" placeholder="Carrera" /></div>
+            <div class="field"><label>Correo</label><input class="input" id="est_correo" type="email" placeholder="correo@epn.edu.ec" /></div>
+            <div class="field"><label>Sede</label><input class="input" value="${state.node}" readonly /></div>
           </div>
-          <p class="help">La sede se asigna automáticamente según la selección actual.</p>
-          ${actions(['Nuevo estudiante', 'Editar', 'Eliminar', 'Buscar', 'Guardar'])}
+          <div class="actions">
+            <button class="btn btn-primary" onclick="crearEstudiante()">Registrar</button>
+            <button class="btn btn-secondary" onclick="editarEstudiante()">Actualizar</button>
+            <button class="btn btn-secondary" onclick="eliminarEstudiante()">Eliminar</button>
+          </div>
+          <div id="est_msg" class="help"></div>
         </div>
-        ${tablaEstudiantes}
+        ${tabla}
       </div>
       ${techCard([
-        ['Nodo:', state.node], ['Tabla:', 'ESTUDIANTE'], ['Tipo de fragmentación:', 'Fragmentación horizontal primaria'], ['Condición Quito:', 'Estudiantes de Quito'], ['Condición Guayaquil:', 'Estudiantes de Guayaquil'], ['Operaciones:', 'Crear, consultar, actualizar y eliminar estudiantes locales']
+        ['Nodo:', state.node], ['Tabla:', 'ESTUDIANTE'], ['Tipo de fragmentación:', 'Fragmentación horizontal primaria'], ['Condición:', 'Cada sede administra sus propios estudiantes'], ['Operaciones:', 'Crear, consultar, actualizar y eliminar estudiantes locales']
       ])}
     </div>`;
   return shell(content, 'estudiantes');
+}
+
+// --- Manejadores CRUD de ESTUDIANTE ---
+function leerEstudiante(){
+  return {
+    id_estudiante: parseInt(document.getElementById('est_id').value, 10),
+    nombre: document.getElementById('est_nombre').value.trim(),
+    carrera: document.getElementById('est_carrera').value.trim(),
+    correo: document.getElementById('est_correo').value.trim()
+  };
+}
+function msgEst(t, ok=true){ const e=document.getElementById('est_msg'); if(e){ e.textContent=t; e.style.color=ok?'seagreen':'crimson'; } }
+async function crearEstudiante(){
+  const d = leerEstudiante();
+  if(!d.nombre) return msgEst('El nombre es obligatorio.', false);
+  try{ await apiSend('/estudiantes','POST',{ nombre:d.nombre, carrera:d.carrera, correo:d.correo }); await render(); }
+  catch(e){ msgEst('Error: '+e.message, false); }
+}
+async function editarEstudiante(){
+  const d = leerEstudiante();
+  if(!d.id_estudiante) return msgEst('Indica el ID del estudiante a actualizar.', false);
+  try{ const r=await apiSend('/estudiantes','PUT',d); if(r.filas===0) return msgEst('No existe ese estudiante.', false); await render(); }
+  catch(e){ msgEst('Error: '+e.message, false); }
+}
+async function eliminarEstudiante(){
+  const d = leerEstudiante();
+  if(!d.id_estudiante) return msgEst('Indica el ID del estudiante a eliminar.', false);
+  if(!confirm('¿Eliminar el estudiante '+d.id_estudiante+'?')) return;
+  try{ const r=await apiSend('/estudiantes','DELETE',{id_estudiante:d.id_estudiante}); if(r.filas===0) return msgEst('No existe ese estudiante.', false); await render(); }
+  catch(e){ msgEst('Error: '+e.message, false); }
 }
 
 async function prestamos() {

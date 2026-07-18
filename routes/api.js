@@ -219,4 +219,50 @@ router.delete('/sedes', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Sede de este nodo (1 = Quito, 2 = Guayaquil). Se lee del .env; por defecto 1.
+const NODO_SEDE = parseInt(process.env.DB_SEDE || '1', 10);
+
+// ===== CRUD de ESTUDIANTE (fragmentación horizontal, local al nodo) =====
+router.post('/estudiantes', async (req, res) => {
+  const { nombre, carrera, correo } = req.body;
+  try {
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('nombre', sql.VarChar(150), nombre)
+      .input('carrera', sql.VarChar(150), carrera)
+      .input('correo', sql.VarChar(150), correo)
+      .input('id_sede', sql.Int, NODO_SEDE)
+      .query(`INSERT INTO ESTUDIANTE (nombre, carrera, correo, id_sede)
+              OUTPUT INSERTED.id_estudiante
+              VALUES (@nombre, @carrera, @correo, @id_sede)`);
+    res.json({ ok: true, id_estudiante: r.recordset[0].id_estudiante });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.put('/estudiantes', async (req, res) => {
+  const { id_estudiante, nombre, carrera, correo } = req.body;
+  try {
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('id_estudiante', sql.Int, id_estudiante)
+      .input('nombre', sql.VarChar(150), nombre)
+      .input('carrera', sql.VarChar(150), carrera)
+      .input('correo', sql.VarChar(150), correo)
+      .query(`UPDATE ESTUDIANTE SET nombre=@nombre, carrera=@carrera, correo=@correo
+              WHERE id_estudiante=@id_estudiante`);
+    res.json({ ok: true, filas: r.rowsAffected[0] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete('/estudiantes', async (req, res) => {
+  const { id_estudiante } = req.body;
+  try {
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('id_estudiante', sql.Int, id_estudiante)
+      .query(`DELETE FROM ESTUDIANTE WHERE id_estudiante=@id_estudiante`);
+    res.json({ ok: true, filas: r.rowsAffected[0] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 module.exports = router;
