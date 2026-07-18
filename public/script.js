@@ -382,22 +382,17 @@ async function prestamos() {
 }
 
 async function ejemplarIdentificacion() {
-  let tablaIdent;
-  try {
-    const data = await apiGet('/ejemplares-identificacion');
-    const rows = data.map(e => [e.id_libro, e.nro_ejemplar, e.codigo_ejemplar]);
-    tablaIdent = rows.length
-      ? table(['ID libro', 'Nro. ejemplar', 'Código ejemplar'], rows)
-      : errorBox('No hay ejemplares identificados registrados.');
-  } catch (err) {
-    tablaIdent = errorBox('No se pudo conectar con el servidor.');
+  const esQuito = state.node === 'Quito';
+  let tablaIdent = '';
+  if (esQuito) {
+    try {
+      const data = await apiGet('/ejemplares-identificacion');
+      const rows = data.map(e => [e.id_libro, e.nro_ejemplar, e.codigo_ejemplar]);
+      tablaIdent = rows.length ? table(['ID libro','Nro. ejemplar','Código ejemplar'], rows) : errorBox('No hay ejemplares identificados registrados.');
+    } catch (err) { tablaIdent = errorBox('No se pudo conectar con el servidor.'); }
   }
 
-  const content = `
-    ${pageHeader('06 · Identificación de ejemplares', 'Identificación física de ejemplares', 'Registra el código físico o de inventario de cada ejemplar.')}
-    <div class="note">Este inventario está centralizado en Quito e incluye los ejemplares de ambas sedes.</div><br />
-    <div class="layout-with-aside">
-      <div class="grid">
+  const bloqueQuito = `
         <div class="card">
           <div class="form-grid">
             <div class="field"><label>ID libro</label><input class="input" id="ident_id_libro" type="number" placeholder="Ej. 1" /></div>
@@ -411,10 +406,21 @@ async function ejemplarIdentificacion() {
           </div>
           <div id="ident_msg" class="help"></div>
         </div>
-        ${tablaIdent}
+        ${tablaIdent}`;
+
+  const bloqueGuayaquil = `
+        <div class="card">
+          <div class="note">La identificación física de los ejemplares está <b>centralizada en el nodo Quito</b>. Este fragmento (fragmentación vertical) reside únicamente en Quito, que mantiene el inventario general de ambas sedes. Desde Guayaquil no se administra localmente.</div>
+        </div>`;
+
+  const content = `
+    ${pageHeader('06 · Identificación de ejemplares', 'Identificación física de ejemplares', 'Registra el código físico o de inventario de cada ejemplar.')}
+    <div class="layout-with-aside">
+      <div class="grid">
+        ${esQuito ? bloqueQuito : bloqueGuayaquil}
       </div>
       ${techCard([
-        ['Nodo:', 'Quito'], ['Tabla:', 'EJEMPLAR_Identificacion'], ['Tipo de fragmentación:', 'Fragmentación vertical'], ['Ubicación:', 'Quito (centralizada)'], ['Operaciones:', 'Crear, consultar, actualizar y eliminar códigos físicos']
+        ['Nodo:', 'Quito (centralizada)'], ['Tabla:', 'EJEMPLAR_Identificacion'], ['Tipo de fragmentación:', 'Fragmentación vertical'], ['Ubicación:', 'Quito'], ['Operaciones:', 'CRUD de códigos físicos (solo en Quito)']
       ])}
     </div>`;
   return shell(content, 'ejemplares-identificacion');

@@ -41,7 +41,7 @@ router.get('/estudiantes', (req, res) =>
   consultar(res, 'SELECT id_estudiante, nombre, carrera, correo, id_sede FROM ESTUDIANTE ORDER BY id_estudiante'));
 
 router.get('/ejemplares-operacion', (req, res) =>
-  consultar(res, 'SELECT id_libro, nro_ejemplar, id_sede, estado FROM EJEMPLAR_Operacion ORDER BY id_libro, nro_ejemplar'));
+  consultar(res, `SELECT id_libro, nro_ejemplar, id_sede, estado FROM ${TABLA_OP} ORDER BY id_libro, nro_ejemplar`));
 
 router.get('/ejemplares-identificacion', (req, res) =>
   consultar(res, 'SELECT id_libro, nro_ejemplar, codigo_ejemplar FROM EJEMPLAR_Identificacion ORDER BY id_libro, nro_ejemplar'));
@@ -58,7 +58,7 @@ router.get('/dashboard', async (req, res) => {
       SELECT
         (SELECT COUNT(*) FROM LIBRO)                                          AS libros,
         (SELECT COUNT(*) FROM ESTUDIANTE)                                     AS estudiantes,
-        (SELECT COUNT(*) FROM EJEMPLAR_Operacion WHERE estado = 'DISPONIBLE') AS ejemplares_disponibles,
+        (SELECT COUNT(*) FROM ${TABLA_OP} WHERE estado = 'DISPONIBLE') AS ejemplares_disponibles,
         (SELECT COUNT(*) FROM PRESTAMO WHERE estado = 'ACTIVO')               AS prestamos_activos
     `);
     res.json(result.recordset[0]);
@@ -74,9 +74,9 @@ router.get('/auditoria', async (req, res) => {
     const pool = await getPool();
     const result = await pool.request().query(`
       SELECT
-        (SELECT COUNT(*) FROM ESTUDIANTE         WHERE id_sede <> 1)        AS estudiantes_fuera,
-        (SELECT COUNT(*) FROM EJEMPLAR_Operacion WHERE id_sede <> 1)        AS ejemplares_fuera,
-        (SELECT COUNT(*) FROM PRESTAMO           WHERE id_sede_origen <> 1) AS prestamos_fuera,
+        (SELECT COUNT(*) FROM ESTUDIANTE WHERE id_sede <> ${NODO_SEDE})        AS estudiantes_fuera,
+        (SELECT COUNT(*) FROM ${TABLA_OP} WHERE id_sede <> ${NODO_SEDE})       AS ejemplares_fuera,
+        (SELECT COUNT(*) FROM PRESTAMO WHERE id_sede_origen <> ${NODO_SEDE})   AS prestamos_fuera,
         (SELECT COUNT(*) FROM SEDE)                                         AS total_sedes,
         (SELECT COUNT(*) FROM LIBRO)                                        AS total_libros
     `);
@@ -90,20 +90,9 @@ router.get('/auditoria', async (req, res) => {
 // ===== CRUD de EJEMPLAR_Identificacion (fragmentación vertical, local Quito) =====
 
 // CREAR
-router.post('/ejemplares-identificacion', async (req, res) => {
-  const { id_libro, nro_ejemplar, codigo_ejemplar } = req.body;
-  try {
-    const pool = await getPool();
-    await pool.request()
-      .input('id_libro', sql.Int, id_libro)
-      .input('nro_ejemplar', sql.Int, nro_ejemplar)
-      .input('codigo_ejemplar', sql.VarChar(100), codigo_ejemplar)
-      .query(`INSERT INTO EJEMPLAR_Identificacion (id_libro, nro_ejemplar, codigo_ejemplar)
-              VALUES (@id_libro, @nro_ejemplar, @codigo_ejemplar)`);
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+router.get('/ejemplares-identificacion', (req, res) => {
+  if (NODO_SEDE !== 1) return res.json([]); // centralizada en Quito
+  return consultar(res, 'SELECT id_libro, nro_ejemplar, codigo_ejemplar FROM EJEMPLAR_Identificacion ORDER BY id_libro, nro_ejemplar');
 });
 
 // ACTUALIZAR (el código de un ejemplar existente)
@@ -221,6 +210,8 @@ router.delete('/sedes', async (req, res) => {
 
 // Sede de este nodo (1 = Quito, 2 = Guayaquil). Se lee del .env; por defecto 1.
 const NODO_SEDE = parseInt(process.env.DB_SEDE || '1', 10);
+// El nombre de la tabla de operación depende del nodo (Quito vs Guayaquil)
+const TABLA_OP = NODO_SEDE === 1 ? 'EJEMPLAR_Operacion' : 'EJEMPLAR_Operacion_Guayaquil';
 
 // ===== CRUD de ESTUDIANTE (fragmentación horizontal, local al nodo) =====
 router.post('/estudiantes', async (req, res) => {
