@@ -131,14 +131,21 @@ function pageHeader(kicker, title, desc) {
 }
 function metric(label, value, note) { return `<div class="card metric-card"><div class="metric-label">${label}</div><div><div class="metric-value">${value}</div><div class="metric-note">${note}</div></div></div>`; }
 
-function dashboard() {
+async function dashboard() {
+  let m = { libros: '—', estudiantes: '—', ejemplares_disponibles: '—', prestamos_activos: '—' };
+  try {
+    m = await apiGet('/dashboard');
+  } catch (err) {
+    // si el backend no responde, se quedan los guiones
+  }
+
   const content = `
     ${pageHeader('02 · Dashboard', 'Resumen general', 'Consulta el estado actual de la biblioteca, los préstamos activos y la actividad reciente de la sede seleccionada.')}
     <div class="grid grid-4">
-      ${metric('Libros en catálogo', '1248', 'Catálogo disponible')}
-      ${metric('Estudiantes registrados', state.node === 'Quito' ? '342' : '287', state.node)}
-      ${metric('Ejemplares disponibles', '812', 'Para préstamo')}
-      ${metric('Préstamos activos', state.node === 'Quito' ? '47' : '39', state.node)}
+      ${metric('Libros en catálogo', m.libros, 'Catálogo disponible')}
+      ${metric('Estudiantes registrados', m.estudiantes, state.node)}
+      ${metric('Ejemplares disponibles', m.ejemplares_disponibles, 'Para préstamo')}
+      ${metric('Préstamos activos', m.prestamos_activos, state.node)}
     </div>
     <br />
     <div class="layout-with-aside">
@@ -244,23 +251,40 @@ async function estudiantes() {
   return shell(content, 'estudiantes');
 }
 
-function prestamos() {
+async function prestamos() {
+  let tablaPrestamos;
+  try {
+    const data = await apiGet('/prestamos');
+    const rows = data.map(p => [
+      p.id_prestamo,
+      p.id_estudiante,
+      p.id_libro,
+      p.nro_ejemplar,
+      p.id_sede_origen === 1 ? 'Quito' : 'Guayaquil',
+      p.id_sede_proveedora === 1 ? 'Quito' : 'Guayaquil',
+      chip(p.tipo_prestamo),
+      chip(p.estado)
+    ]);
+    tablaPrestamos = rows.length
+      ? table(['ID préstamo','Estudiante','Libro','Ejemplar','Sede estudiante','Sede proveedora','Tipo','Estado'], rows)
+      : errorBox('No hay préstamos registrados en este nodo.');
+  } catch (err) {
+    tablaPrestamos = errorBox('No se pudo conectar con el servidor. Verifica que el backend esté corriendo (npm start).');
+  }
+
   const content = `
     ${pageHeader('05 · Préstamos', 'Gestión de préstamos', 'Registra préstamos, devoluciones y consultas de libros solicitados por los estudiantes.')}
+    ${guardGuayaquil()}
     <div class="note">Cuando un estudiante solicita un libro de otra sede, el sistema registra el préstamo en la sede a la que pertenece el estudiante.</div><br />
     <div class="layout-with-aside">
       <div class="grid">
         <div class="card">
           <div class="form-grid">
-            ${field('ID préstamo')}${field('Fecha préstamo', '2026-06-27', 'date')}${field('Fecha devolución', '2026-07-04', 'date')}${selectField('Estado', ['ACTIVO','DEVUELTO','CANCELADO'], 'ACTIVO')}${selectField('Tipo de préstamo', ['Local','Entre sedes'], 'Entre sedes')}${field('ID estudiante')}${field('ID libro')}${field('Nro. ejemplar')}${field('Sede del estudiante', state.node, 'text', true)}${selectField('Sede proveedora', [state.node, otherNode()], otherNode())}
+            ${field('ID préstamo')}${field('Fecha préstamo', '2026-06-27', 'date')}${field('Fecha devolución', '2026-07-04', 'date')}${selectField('Estado', ['ACTIVO','DEVUELTO','CANCELADO'], 'ACTIVO')}${selectField('Tipo de préstamo', ['LOCAL','REMOTO'], 'LOCAL')}${field('ID estudiante')}${field('ID libro')}${field('Nro. ejemplar')}${field('Sede del estudiante', state.node, 'text', true)}${selectField('Sede proveedora', [state.node, otherNode()], state.node)}
           </div>
           ${actions(['Registrar préstamo', 'Registrar devolución', 'Buscar préstamo', 'Cancelar préstamo'])}
         </div>
-        ${table(['ID préstamo','Estudiante','Libro','Ejemplar','Sede estudiante','Sede proveedora','Estado','Acciones'], [
-          ['1','Ana Torres','Bases de Datos','3','Quito','Quito', chip('Activo'),'Devolver / Cancelar'],
-          ['2','Diego Ruiz','Redes','5','Quito','Guayaquil', chip('Activo'),'Devolver / Cancelar'],
-          ['3','Carla Mena','Programación','2','Guayaquil','Quito', chip('Devuelto'),'Ver']
-        ])}
+        ${tablaPrestamos}
       </div>
       ${techCard([
         ['Nodo:', state.node], ['Tabla:', 'PRESTAMO'], ['Tipo de fragmentación:', 'Fragmentación horizontal derivada'], ['Derivada desde:', 'ESTUDIANTE'], ['Condición:', 'Préstamos originados por estudiantes del nodo local'], ['Operaciones:', 'Registrar, consultar, devolver y cancelar préstamos']
@@ -269,28 +293,63 @@ function prestamos() {
   return shell(content, 'prestamos');
 }
 
-function ejemplarIdentificacion() {
+async function ejemplarIdentificacion() {
+  let tablaIdent;
+  try {
+    const data = await apiGet('/ejemplares-identificacion');
+    const rows = data.map(e => [
+      e.id_libro,
+      e.nro_ejemplar,
+      e.codigo_ejemplar,
+      'Editar / Eliminar'
+    ]);
+    tablaIdent = rows.length
+      ? table(['ID libro', 'Nro. ejemplar', 'Código ejemplar', 'Acciones'], rows)
+      : errorBox('No hay ejemplares identificados registrados.');
+  } catch (err) {
+    tablaIdent = errorBox('No se pudo conectar con el servidor. Verifica que el backend esté corriendo (npm start).');
+  }
+
   const content = `
     ${pageHeader('06 · Identificación de ejemplares', 'Identificación física de ejemplares', 'Registra el código físico o de inventario de cada ejemplar disponible en la biblioteca.')}
+    <div class="note">Este inventario de identificación está centralizado en Quito e incluye los ejemplares de ambas sedes.</div><br />
     <div class="layout-with-aside">
       <div class="grid">
         <div class="card"><div class="form-grid">${field('ID libro')}${field('Nro. ejemplar')}${field('Código ejemplar', 'Q-BD-101-001')}</div>${actions(['Registrar identificación','Editar código','Eliminar','Buscar'])}</div>
-        ${table(['ID libro','Nro. ejemplar','Código ejemplar','Acciones'], [['101','1','Q-BD-101-001','Editar / Eliminar'],['101','2','Q-BD-101-002','Editar / Eliminar'],['102','1','Q-SO-102-001','Editar / Eliminar']])}
+        ${tablaIdent}
       </div>
       ${techCard([
-        ['Nodo:', 'Quito'], ['Tabla:', 'EJEMPLAR_Identificacion'], ['Tipo de fragmentación:', 'Fragmentación vertical'], ['Ubicación:', 'Quito'], ['Función:', 'Identificación física general de ejemplares'], ['Operaciones:', 'Registrar, consultar, editar y eliminar códigos físicos de ejemplares']
+        ['Nodo:', 'Quito'], ['Tabla:', 'EJEMPLAR_Identificacion'], ['Tipo de fragmentación:', 'Fragmentación vertical'], ['Ubicación:', 'Quito (centralizada)'], ['Función:', 'Identificación física general de ejemplares'], ['Operaciones:', 'Registrar, consultar, editar y eliminar códigos físicos de ejemplares']
       ])}
     </div>`;
   return shell(content, 'ejemplares-identificacion');
 }
 
-function ejemplarOperacion() {
+async function ejemplarOperacion() {
+  let tablaOper;
+  try {
+    const data = await apiGet('/ejemplares-operacion');
+    const rows = data.map(e => [
+      e.id_libro,
+      e.nro_ejemplar,
+      e.id_sede === 1 ? 'Quito' : 'Guayaquil',
+      chip(e.estado),
+      'Cambiar estado'
+    ]);
+    tablaOper = rows.length
+      ? table(['ID libro', 'Nro. ejemplar', 'Sede', 'Estado', 'Acciones'], rows)
+      : errorBox('No hay ejemplares operativos en este nodo.');
+  } catch (err) {
+    tablaOper = errorBox('No se pudo conectar con el servidor. Verifica que el backend esté corriendo (npm start).');
+  }
+
   const content = `
     ${pageHeader('07 · Ejemplares', 'Estado de ejemplares', 'Consulta y actualiza el estado de los ejemplares disponibles en la sede seleccionada.')}
+    ${guardGuayaquil()}
     <div class="layout-with-aside">
       <div class="grid">
         <div class="card"><div class="form-grid">${field('ID libro')}${field('Nro. ejemplar')}${field('Sede', state.node, 'text', true)}${selectField('Estado', ['DISPONIBLE','PRESTADO','RESERVADO','MANTENIMIENTO'], 'DISPONIBLE')}</div>${actions(['Cambiar estado','Buscar disponibles','Registrar operación','Actualizar'])}</div>
-        ${table(['ID libro','Nro. ejemplar','Sede','Estado','Acciones'], [['101','1',state.node, chip('DISPONIBLE'),'Cambiar estado'],['101','2',state.node, chip('PRESTADO'),'Cambiar estado'],['103','1',state.node, chip('RESERVADO'),'Cambiar estado'],['104','1',state.node, chip('MANTENIMIENTO'),'Cambiar estado']])}
+        ${tablaOper}
       </div>
       ${techCard([
         ['Nodo:', state.node], ['Tabla:', 'EJEMPLAR_Operacion'], ['Tipo de fragmentación:', 'Fragmentación mixta'], ['Vertical:', 'Separación identificación / operación'], ['Horizontal:', 'Quito o Guayaquil'], ['Operaciones:', 'Registrar, consultar y actualizar estado operativo de ejemplares locales']
@@ -299,52 +358,50 @@ function ejemplarOperacion() {
   return shell(content, 'ejemplares-operacion');
 }
 
-function consultaRemota() {
+async function consultaRemota() {
+  let auditMetrics, validationTable;
+  try {
+    const a = await apiGet('/auditoria');
+    const ok = (n) => n === 0;
+    const catalogoOk = a.total_sedes > 0 && a.total_libros > 0;
+    auditMetrics = `
+      <div class="audit-metrics">
+        ${metric('Estudiantes fuera de sede', a.estudiantes_fuera, ok(a.estudiantes_fuera) ? 'Sin inconsistencias' : 'Revisar')}
+        ${metric('Ejemplares fuera de sede', a.ejemplares_fuera, ok(a.ejemplares_fuera) ? 'Operación correcta' : 'Revisar')}
+        ${metric('Préstamos fuera de regla', a.prestamos_fuera, ok(a.prestamos_fuera) ? 'Origen validado' : 'Revisar')}
+        ${metric('Catálogo compartido', catalogoOk ? 'Correcto' : 'Vacío', 'Sedes y libros')}
+      </div>`;
+    validationTable = table(['Validación','Resultado','Detalle','Estado'], [
+      ['Estudiantes por sede', ok(a.estudiantes_fuera)?'Correcto':'Inconsistente','No existen estudiantes asignados a una sede incorrecta', chip(ok(a.estudiantes_fuera)?'Aprobado':'Revisar')],
+      ['Ejemplares operativos', ok(a.ejemplares_fuera)?'Correcto':'Inconsistente','Los ejemplares corresponden a su sede de operación', chip(ok(a.ejemplares_fuera)?'Aprobado':'Revisar')],
+      ['Préstamos', ok(a.prestamos_fuera)?'Correcto':'Inconsistente','Los préstamos se registran en la sede del estudiante solicitante', chip(ok(a.prestamos_fuera)?'Aprobado':'Revisar')],
+      ['Catálogo compartido', catalogoOk?'Correcto':'Vacío','La información de sedes y libros está disponible para consulta', chip('Aprobado')]
+    ]);
+  } catch (err) {
+    auditMetrics = errorBox('No se pudo conectar con el servidor para calcular la auditoría.');
+    validationTable = '';
+  }
+
   const content = `
     ${pageHeader('08 · Consulta de disponibilidad remota / Auditoría', 'Disponibilidad remota y auditoría', 'Consulta ejemplares disponibles en otra sede y valida que los registros del sistema se mantengan correctos entre Quito y Guayaquil.')}
     <div class="layout-with-aside">
       <div class="grid">
         <div class="card">
-          <div class="section-title">Consulta de disponibilidad</div>
-          <p class="help">Busca libros y ejemplares disponibles en otra sede para apoyar préstamos entre bibliotecas.</p>
-          <div class="form-grid">
-            ${field('Sede actual', state.node, 'text', true)}
-            ${selectField('Sede remota', [otherNode(), state.node], otherNode())}
-            ${field('Libro')}
-            ${field('Ejemplar')}
-            ${selectField('Estado', ['Disponible','Prestado','Reservado','Mantenimiento'], 'Disponible')}
-            ${field('Sede proveedora', otherNode(), 'text', true)}
-          </div>
-          ${actions(['Consultar disponibilidad remota','Solicitar préstamo remoto','Validar fragmentación'])}
+          <div class="section-title">Consulta de disponibilidad remota</div>
+          <div class="note">Esta sección consulta la vista particionada distribuida y requiere que el nodo Guayaquil esté en línea. Se demuestra en la sesión coordinada con el nodo remoto.</div>
         </div>
 
-        ${table(['Libro','Ejemplar','Sede proveedora','Estado','Acción'], [
-          ['Bases de Datos','3',otherNode(),chip('Disponible'),'Solicitar préstamo'],
-          ['Redes de Computadoras','5',otherNode(),chip('Disponible'),'Solicitar préstamo'],
-          ['Programación Java','2',state.node,chip('Prestado'),'Ver detalle']
-        ])}
-
-        <div class="audit-metrics">
-          ${metric('Estudiantes fuera de sede', '0', 'Sin inconsistencias')}
-          ${metric('Ejemplares fuera de sede', '0', 'Operación correcta')}
-          ${metric('Préstamos fuera de regla', '0', 'Origen validado')}
-          ${metric('Catálogo compartido', 'Correcto', 'Sedes y libros')}
-        </div>
-
-        ${table(['Validación','Resultado','Detalle','Estado'], [
-          ['Estudiantes por sede','Correcto','No existen estudiantes asignados a una sede incorrecta',chip('Aprobado')],
-          ['Ejemplares operativos','Correcto','Los ejemplares corresponden a su sede de operación',chip('Aprobado')],
-          ['Préstamos','Correcto','Los préstamos se registran en la sede del estudiante solicitante',chip('Aprobado')],
-          ['Catálogo compartido','Correcto','La información de sedes y libros está disponible para consulta',chip('Aprobado')]
-        ])}
+        <div class="section-title">Auditoría de fragmentación (nodo local)</div>
+        ${auditMetrics}
+        ${validationTable}
 
         <div class="card soft-panel">
           <div class="section-title">Resumen de la pantalla</div>
-          <p class="help">Esta sección une la consulta operativa y la validación administrativa. Primero permite revisar disponibilidad de ejemplares en la sede remota y luego muestra una comprobación de que las reglas de distribución se cumplen correctamente.</p>
+          <p class="help">La auditoría valida que las reglas de distribución se cumplan en el nodo local: cada estudiante, ejemplar y préstamo pertenece a la sede correcta. La consulta de disponibilidad remota (vista particionada) se ejecuta con el nodo Guayaquil en línea.</p>
         </div>
       </div>
       ${techCard([
-        ['Nodo:', state.node], ['Tabla:', 'EJEMPLAR_Operacion, PRESTAMO, SEDE, LIBRO'], ['Tipo de fragmentación:', 'Consulta distribuida y validación de reglas de fragmentación'], ['Operaciones:', 'Consultar disponibilidad remota, solicitar préstamo remoto y validar distribución de datos']
+        ['Nodo:', state.node], ['Tabla:', 'ESTUDIANTE, EJEMPLAR_Operacion, PRESTAMO, SEDE, LIBRO'], ['Tipo de fragmentación:', 'Validación de reglas de fragmentación + consulta distribuida'], ['Operaciones:', 'Auditar distribución local y consultar disponibilidad remota']
       ])}
     </div>`;
   return shell(content, 'consulta-remota');

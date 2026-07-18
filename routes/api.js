@@ -50,5 +50,41 @@ router.get('/prestamos', (req, res) =>
   consultar(res, `SELECT id_prestamo, fecha_prestamo, fecha_devolucion, estado, tipo_prestamo,
                          id_estudiante, id_libro, nro_ejemplar, id_sede_origen, id_sede_proveedora
                   FROM PRESTAMO ORDER BY id_prestamo`));
+// Conteos para el Dashboard (una sola consulta con subconsultas)
+router.get('/dashboard', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const result = await pool.request().query(`
+      SELECT
+        (SELECT COUNT(*) FROM LIBRO)                                          AS libros,
+        (SELECT COUNT(*) FROM ESTUDIANTE)                                     AS estudiantes,
+        (SELECT COUNT(*) FROM EJEMPLAR_Operacion WHERE estado = 'DISPONIBLE') AS ejemplares_disponibles,
+        (SELECT COUNT(*) FROM PRESTAMO WHERE estado = 'ACTIVO')               AS prestamos_activos
+    `);
+    res.json(result.recordset[0]);
+  } catch (err) {
+    console.error('Error dashboard:', err.message);
+    res.status(500).json({ error: 'Error de base de datos', detalle: err.message });
+  }
+});
+
+// Auditoria de fragmentacion del nodo local (Quito = id_sede 1)
+router.get('/auditoria', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const result = await pool.request().query(`
+      SELECT
+        (SELECT COUNT(*) FROM ESTUDIANTE         WHERE id_sede <> 1)        AS estudiantes_fuera,
+        (SELECT COUNT(*) FROM EJEMPLAR_Operacion WHERE id_sede <> 1)        AS ejemplares_fuera,
+        (SELECT COUNT(*) FROM PRESTAMO           WHERE id_sede_origen <> 1) AS prestamos_fuera,
+        (SELECT COUNT(*) FROM SEDE)                                         AS total_sedes,
+        (SELECT COUNT(*) FROM LIBRO)                                        AS total_libros
+    `);
+    res.json(result.recordset[0]);
+  } catch (err) {
+    console.error('Error auditoria:', err.message);
+    res.status(500).json({ error: 'Error de base de datos', detalle: err.message });
+  }
+});
 
 module.exports = router;
