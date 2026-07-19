@@ -42,8 +42,7 @@ const routes = [
   { id: 'sede-libro', label: 'Sedes y Libros', icon: '≡' },
   { id: 'estudiantes', label: 'Estudiantes', icon: '♙' },
   { id: 'prestamos', label: 'Préstamos', icon: '▣' },
-  { id: 'ejemplares-identificacion', label: 'Ejemplares · Identificación', icon: '#' },
-  { id: 'ejemplares-operacion', label: 'Ejemplares · Operación', icon: '⌁' },
+  { id: 'ejemplares', label: 'Ejemplares (Vista Particionada)', icon: '⌁' },
   { id: 'consulta-remota', label: 'Disponibilidad / Auditoría', icon: '◎' },
 ];
 
@@ -464,37 +463,68 @@ async function eliminarIdentificacion() {
   } catch (err) { msgIdent('Error: ' + err.message, false); }
 }
 
-async function ejemplarOperacion() {
-  let tablaOper;
+async function ejemplaresUnificado() {
+  let tabla;
   try {
-    const data = await apiGet('/ejemplares-operacion');
+    const data = await apiGet('/ejemplares-global');
     const rows = data.map(e => [
-      e.id_libro,
-      e.nro_ejemplar,
+      e.id_libro, e.nro_ejemplar,
       e.id_sede === 1 ? 'Quito' : 'Guayaquil',
-      chip(e.estado),
-      'Cambiar estado'
+      e.codigo_ejemplar || '—',
+      chip(e.estado)
     ]);
-    tablaOper = rows.length
-      ? table(['ID libro', 'Nro. ejemplar', 'Sede', 'Estado', 'Acciones'], rows)
-      : errorBox('No hay ejemplares operativos en este nodo.');
+    tabla = rows.length ? table(['ID libro','Nro. ejemplar','Sede','Código (Quito)','Estado'], rows)
+                        : errorBox('No hay ejemplares registrados.');
   } catch (err) {
-    tablaOper = errorBox('No se pudo conectar con el servidor. Verifica que el backend esté corriendo (npm start).');
+    tabla = errorBox('No se pudo leer la vista global. Verifica que Guayaquil esté en línea (la vista distribuida necesita ambos nodos).');
   }
 
   const content = `
-    ${pageHeader('07 · Ejemplares', 'Estado de ejemplares', 'Consulta y actualiza el estado de los ejemplares disponibles en la sede seleccionada.')}
-    ${guardGuayaquil()}
+    ${pageHeader('06/07 · Ejemplares (Vista Particionada)', 'Registro unificado de ejemplares', 'Una sola pantalla captura todos los datos del ejemplar. El aplicativo reparte cada parte a su fragmento: el código físico va a la identificación centralizada en Quito (ruta completa), y la operación se registra en la vista particionada, que decide el nodo según la sede.')}
+    <div class="note">El registro se realiza en <b>una transacción distribuida</b>: el código (fragmentación vertical → Quito) y la operación (fragmentación mixta → vista particionada) se guardan juntos o no se guardan. Requiere ambos nodos en línea.</div><br />
     <div class="layout-with-aside">
       <div class="grid">
-        <div class="card"><div class="form-grid">${field('ID libro')}${field('Nro. ejemplar')}${field('Sede', state.node, 'text', true)}${selectField('Estado', ['DISPONIBLE','PRESTADO','RESERVADO','MANTENIMIENTO'], 'DISPONIBLE')}</div>${actions(['Cambiar estado','Buscar disponibles','Registrar operación','Actualizar'])}</div>
-        ${tablaOper}
+        <div class="card">
+          <div class="section-title">Registrar ejemplar</div>
+          <div class="form-grid">
+            <div class="field"><label>ID libro</label><input class="input" id="ej_id_libro" type="number" placeholder="Ej. 1" /></div>
+            <div class="field"><label>Nro. ejemplar</label><input class="input" id="ej_nro" type="number" placeholder="Impar=Quito, Par=Guayaquil" /></div>
+            <div class="field"><label>Sede (fragmento operativo)</label><select class="select" id="ej_sede"><option value="1">Quito (1)</option><option value="2">Guayaquil (2)</option></select></div>
+            <div class="field"><label>Código ejemplar (va a Quito)</label><input class="input" id="ej_codigo" type="text" placeholder="Ej. UIO-LIB001-EJ003" /></div>
+            <div class="field"><label>Estado</label><select class="select" id="ej_estado"><option>DISPONIBLE</option><option>PRESTADO</option><option>RESERVADO</option><option>MANTENIMIENTO</option></select></div>
+          </div>
+          <div class="actions"><button class="btn btn-primary" onclick="registrarEjemplar()">Registrar en la vista particionada</button></div>
+          <div id="ej_msg" class="help"></div>
+        </div>
+        ${tabla}
       </div>
       ${techCard([
-        ['Nodo:', state.node], ['Tabla:', 'EJEMPLAR_Operacion'], ['Tipo de fragmentación:', 'Fragmentación mixta'], ['Vertical:', 'Separación identificación / operación'], ['Horizontal:', 'Quito o Guayaquil'], ['Operaciones:', 'Registrar, consultar y actualizar estado operativo de ejemplares locales']
+        ['Nodo actual:', state.node],
+        ['Vertical:', 'codigo_ejemplar → EJEMPLAR_Identificacion (Quito, ruta completa)'],
+        ['Mixta:', 'id_sede + estado → V_EJEMPLAR_Operacion_Global (la vista enruta)'],
+        ['Atomicidad:', 'Transacción distribuida (MSDTC)'],
+        ['Requisitos:', '5 (mixta vía vista) y 6 (vertical) en una sola pantalla']
       ])}
     </div>`;
-  return shell(content, 'ejemplares-operacion');
+  return shell(content, 'ejemplares');
+}
+
+async function registrarEjemplar() {
+  const d = {
+    id_libro: parseInt(document.getElementById('ej_id_libro').value, 10),
+    nro_ejemplar: parseInt(document.getElementById('ej_nro').value, 10),
+    id_sede: parseInt(document.getElementById('ej_sede').value, 10),
+    codigo_ejemplar: document.getElementById('ej_codigo').value.trim(),
+    estado: document.getElementById('ej_estado').value
+  };
+  const msg = document.getElementById('ej_msg');
+  const setMsg = (t, ok) => { msg.textContent = t; msg.style.color = ok ? 'seagreen' : 'crimson'; };
+  if (!d.id_libro || !d.nro_ejemplar || !d.codigo_ejemplar) return setMsg('Completa ID libro, Nro. ejemplar y Código.', false);
+  try {
+    await apiSend('/ejemplares-global', 'POST', d);
+    setMsg('Registrado correctamente en ambos fragmentos.', true);
+    await render();
+  } catch (err) { setMsg('Error: ' + err.message, false); }
 }
 
 async function consultaRemota() {
@@ -555,8 +585,7 @@ async function render() {
     'sede-libro': sedeLibro,
     estudiantes,
     prestamos,
-    'ejemplares-identificacion': ejemplarIdentificacion,
-    'ejemplares-operacion': ejemplarOperacion,
+    'ejemplares': ejemplaresUnificado,
     'consulta-remota': consultaRemota,
   };
   const view = views[route] || dashboard;

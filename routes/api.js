@@ -9,12 +9,17 @@ const NODO_SEDE = parseInt(process.env.DB_SEDE || '1', 10);
 const esQuito = NODO_SEDE === 1;
 
 // Nombres de tabla según el nodo (Quito sin sufijo, Guayaquil con sufijo _Guayaquil).
-// Es seguro interpolar estos nombres porque salen de la configuración, no del usuario.
 const T = {
   operacion:  esQuito ? 'EJEMPLAR_Operacion' : 'EJEMPLAR_Operacion_Guayaquil',
   estudiante: esQuito ? 'ESTUDIANTE'         : 'ESTUDIANTE_Guayaquil',
   prestamo:   esQuito ? 'PRESTAMO'           : 'PRESTAMO_Guayaquil',
 };
+
+// Ruta a la identificacion (vertical, centralizada en Quito):
+//  - En Quito: local.   - En Guayaquil: remota via linked server JHONATAN.
+const RUTA_IDENT = esQuito
+  ? 'Biblioteca_Quito.dbo.EJEMPLAR_Identificacion'
+  : 'JHONATAN.Biblioteca_Quito.dbo.EJEMPLAR_Identificacion';
 
 // Helper: ejecuta una consulta y devuelve el arreglo de filas como JSON.
 async function consultar(res, sqlText) {
@@ -267,6 +272,59 @@ router.delete('/estudiantes', async (req, res) => {
       .query(`DELETE FROM ${T.estudiante} WHERE id_estudiante=@id_estudiante`);
     res.json({ ok: true, filas: r.rowsAffected[0] });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ===== EJEMPLARES: pantalla unificada (registro dividido en 2 fragmentos, atomico) =====
+
+// GET: listado GLOBAL desde la vista particionada + codigo de la identificacion (Quito).
+router.get('/ejemplares-global', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const r = await pool.request().query(`
+      SELECT v.id_libro, v.nro_ejemplar, v.id_sede, v.estado, i.codigo_ejemplar
+      FROM V_EJEMPLAR_Operacion_Global v
+      LEFT JOIN ${RUTA_IDENT} i
+        ON i.id_libro = v.id_libro AND i.nro_ejemplar = v.nro_ejemplar
+      ORDER BY v.id_sede, v.id_libro, v.nro_ejemplar
+    `);
+    res.json(r.recordset);
+  } catch (err) {
+    console.error('Error ejemplares-global:', err.message);
+    res.status(500).json({ error: 'Error de base de datos', detalle: err.message });
+  }
+});
+
+// POST: REGISTRAR un ejemplar completo en UNA transaccion distribuida.
+//  Todo en un solo batch: SET XACT_ABORT ON + BEGIN DISTRIBUTED TRANSACTION + 2 INSERT + COMMIT.
+//  (1) codigo_ejemplar -> identificacion en Quito (fragmento VERTICAL, ruta completa)
+//  (2) id_sede + estado -> vista particionada (fragmento MIXTO, la vista enruta)
+router.post('/ejemplares-global', async (req, res) => {
+  const { id_libro, nro_ejemplar, id_sede, codigo_ejemplar, estado } = req.body;
+  if (!id_libro || !nro_ejemplar || !id_sede || !codigo_ejemplar || !estado) {
+    return res.status(400).json({ error: 'Faltan datos: se requieren id_libro, nro_ejemplar, id_sede, codigo_ejemplar y estado.' });
+  }
+  try {
+    const pool = await getPool();
+    const request = pool.request();
+    request.input('il', sql.Int, id_libro);
+    request.input('ne', sql.Int, nro_ejemplar);
+    request.input('is', sql.Int, id_sede);
+    request.input('cod', sql.VarChar(100), codigo_ejemplar);
+    request.input('est', sql.VarChar(20), estado);
+    await request.query(`
+      SET XACT_ABORT ON;
+      BEGIN DISTRIBUTED TRANSACTION;
+        INSERT INTO ${RUTA_IDENT} (id_libro, nro_ejemplar, codigo_ejemplar)
+        VALUES (@il, @ne, @cod);
+        INSERT INTO V_EJEMPLAR_Operacion_Global (id_libro, nro_ejemplar, id_sede, estado)
+        VALUES (@il, @ne, @is, @est);
+      COMMIT TRANSACTION;
+    `);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error registro ejemplar:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;
