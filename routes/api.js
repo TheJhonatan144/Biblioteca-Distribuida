@@ -1,7 +1,20 @@
-// routes/api.js  -  Endpoints REST de solo lectura (por ahora) contra Biblioteca_Quito.
+// routes/api.js  -  Endpoints REST. Compatible con ambos nodos (Quito y Guayaquil).
 const express = require('express');
 const router = express.Router();
 const { sql, getPool } = require('../db');
+
+// ===== Configuración del nodo =====
+// Sede de este nodo (1 = Quito, 2 = Guayaquil). Se lee del .env; por defecto 1.
+const NODO_SEDE = parseInt(process.env.DB_SEDE || '1', 10);
+const esQuito = NODO_SEDE === 1;
+
+// Nombres de tabla según el nodo (Quito sin sufijo, Guayaquil con sufijo _Guayaquil).
+// Es seguro interpolar estos nombres porque salen de la configuración, no del usuario.
+const T = {
+  operacion:  esQuito ? 'EJEMPLAR_Operacion' : 'EJEMPLAR_Operacion_Guayaquil',
+  estudiante: esQuito ? 'ESTUDIANTE'         : 'ESTUDIANTE_Guayaquil',
+  prestamo:   esQuito ? 'PRESTAMO'           : 'PRESTAMO_Guayaquil',
+};
 
 // Helper: ejecuta una consulta y devuelve el arreglo de filas como JSON.
 async function consultar(res, sqlText) {
@@ -30,7 +43,7 @@ router.get('/db-check', async (req, res) => {
   }
 });
 
-// --- Tablas del nodo Quito ---
+// ===== LECTURA de tablas =====
 router.get('/sedes', (req, res) =>
   consultar(res, 'SELECT id_sede, nombre, ciudad FROM SEDE ORDER BY id_sede'));
 
@@ -38,28 +51,32 @@ router.get('/libros', (req, res) =>
   consultar(res, 'SELECT id_libro, titulo, autor, categoria FROM LIBRO ORDER BY id_libro'));
 
 router.get('/estudiantes', (req, res) =>
-  consultar(res, 'SELECT id_estudiante, nombre, carrera, correo, id_sede FROM ESTUDIANTE ORDER BY id_estudiante'));
+  consultar(res, `SELECT id_estudiante, nombre, carrera, correo, id_sede FROM ${T.estudiante} ORDER BY id_estudiante`));
 
 router.get('/ejemplares-operacion', (req, res) =>
-  consultar(res, `SELECT id_libro, nro_ejemplar, id_sede, estado FROM ${TABLA_OP} ORDER BY id_libro, nro_ejemplar`));
-
-router.get('/ejemplares-identificacion', (req, res) =>
-  consultar(res, 'SELECT id_libro, nro_ejemplar, codigo_ejemplar FROM EJEMPLAR_Identificacion ORDER BY id_libro, nro_ejemplar'));
+  consultar(res, `SELECT id_libro, nro_ejemplar, id_sede, estado FROM ${T.operacion} ORDER BY id_libro, nro_ejemplar`));
 
 router.get('/prestamos', (req, res) =>
   consultar(res, `SELECT id_prestamo, fecha_prestamo, fecha_devolucion, estado, tipo_prestamo,
                          id_estudiante, id_libro, nro_ejemplar, id_sede_origen, id_sede_proveedora
-                  FROM PRESTAMO ORDER BY id_prestamo`));
-// Conteos para el Dashboard (una sola consulta con subconsultas)
+                  FROM ${T.prestamo} ORDER BY id_prestamo`));
+
+// EJEMPLAR_Identificacion está centralizada en Quito. En Guayaquil devuelve vacío.
+router.get('/ejemplares-identificacion', (req, res) => {
+  if (!esQuito) return res.json([]);
+  return consultar(res, 'SELECT id_libro, nro_ejemplar, codigo_ejemplar FROM EJEMPLAR_Identificacion ORDER BY id_libro, nro_ejemplar');
+});
+
+// ===== Dashboard (conteos reales del nodo) =====
 router.get('/dashboard', async (req, res) => {
   try {
     const pool = await getPool();
     const result = await pool.request().query(`
       SELECT
-        (SELECT COUNT(*) FROM LIBRO)                                          AS libros,
-        (SELECT COUNT(*) FROM ESTUDIANTE)                                     AS estudiantes,
-        (SELECT COUNT(*) FROM ${TABLA_OP} WHERE estado = 'DISPONIBLE') AS ejemplares_disponibles,
-        (SELECT COUNT(*) FROM PRESTAMO WHERE estado = 'ACTIVO')               AS prestamos_activos
+        (SELECT COUNT(*) FROM LIBRO)                                     AS libros,
+        (SELECT COUNT(*) FROM ${T.estudiante})                          AS estudiantes,
+        (SELECT COUNT(*) FROM ${T.operacion} WHERE estado='DISPONIBLE') AS ejemplares_disponibles,
+        (SELECT COUNT(*) FROM ${T.prestamo}  WHERE estado='ACTIVO')     AS prestamos_activos
     `);
     res.json(result.recordset[0]);
   } catch (err) {
@@ -68,17 +85,17 @@ router.get('/dashboard', async (req, res) => {
   }
 });
 
-// Auditoria de fragmentacion del nodo local (Quito = id_sede 1)
+// ===== Auditoría de fragmentación del nodo local =====
 router.get('/auditoria', async (req, res) => {
   try {
     const pool = await getPool();
     const result = await pool.request().query(`
       SELECT
-        (SELECT COUNT(*) FROM ESTUDIANTE WHERE id_sede <> ${NODO_SEDE})        AS estudiantes_fuera,
-        (SELECT COUNT(*) FROM ${TABLA_OP} WHERE id_sede <> ${NODO_SEDE})       AS ejemplares_fuera,
-        (SELECT COUNT(*) FROM PRESTAMO WHERE id_sede_origen <> ${NODO_SEDE})   AS prestamos_fuera,
-        (SELECT COUNT(*) FROM SEDE)                                         AS total_sedes,
-        (SELECT COUNT(*) FROM LIBRO)                                        AS total_libros
+        (SELECT COUNT(*) FROM ${T.estudiante} WHERE id_sede <> ${NODO_SEDE})       AS estudiantes_fuera,
+        (SELECT COUNT(*) FROM ${T.operacion}  WHERE id_sede <> ${NODO_SEDE})       AS ejemplares_fuera,
+        (SELECT COUNT(*) FROM ${T.prestamo}   WHERE id_sede_origen <> ${NODO_SEDE}) AS prestamos_fuera,
+        (SELECT COUNT(*) FROM SEDE)                                                AS total_sedes,
+        (SELECT COUNT(*) FROM LIBRO)                                               AS total_libros
     `);
     res.json(result.recordset[0]);
   } catch (err) {
@@ -87,15 +104,21 @@ router.get('/auditoria', async (req, res) => {
   }
 });
 
-// ===== CRUD de EJEMPLAR_Identificacion (fragmentación vertical, local Quito) =====
-
-// CREAR
-router.get('/ejemplares-identificacion', (req, res) => {
-  if (NODO_SEDE !== 1) return res.json([]); // centralizada en Quito
-  return consultar(res, 'SELECT id_libro, nro_ejemplar, codigo_ejemplar FROM EJEMPLAR_Identificacion ORDER BY id_libro, nro_ejemplar');
+// ===== CRUD de EJEMPLAR_Identificacion (fragmentación vertical, solo Quito) =====
+router.post('/ejemplares-identificacion', async (req, res) => {
+  const { id_libro, nro_ejemplar, codigo_ejemplar } = req.body;
+  try {
+    const pool = await getPool();
+    await pool.request()
+      .input('id_libro', sql.Int, id_libro)
+      .input('nro_ejemplar', sql.Int, nro_ejemplar)
+      .input('codigo_ejemplar', sql.VarChar(100), codigo_ejemplar)
+      .query(`INSERT INTO EJEMPLAR_Identificacion (id_libro, nro_ejemplar, codigo_ejemplar)
+              VALUES (@id_libro, @nro_ejemplar, @codigo_ejemplar)`);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ACTUALIZAR (el código de un ejemplar existente)
 router.put('/ejemplares-identificacion', async (req, res) => {
   const { id_libro, nro_ejemplar, codigo_ejemplar } = req.body;
   try {
@@ -107,12 +130,9 @@ router.put('/ejemplares-identificacion', async (req, res) => {
       .query(`UPDATE EJEMPLAR_Identificacion SET codigo_ejemplar = @codigo_ejemplar
               WHERE id_libro = @id_libro AND nro_ejemplar = @nro_ejemplar`);
     res.json({ ok: true, filas: r.rowsAffected[0] });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ELIMINAR
 router.delete('/ejemplares-identificacion', async (req, res) => {
   const { id_libro, nro_ejemplar } = req.body;
   try {
@@ -123,9 +143,7 @@ router.delete('/ejemplares-identificacion', async (req, res) => {
       .query(`DELETE FROM EJEMPLAR_Identificacion
               WHERE id_libro = @id_libro AND nro_ejemplar = @nro_ejemplar`);
     res.json({ ok: true, filas: r.rowsAffected[0] });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ===== CRUD de LIBRO (replicado: solo se escribe en Quito) =====
@@ -208,11 +226,6 @@ router.delete('/sedes', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Sede de este nodo (1 = Quito, 2 = Guayaquil). Se lee del .env; por defecto 1.
-const NODO_SEDE = parseInt(process.env.DB_SEDE || '1', 10);
-// El nombre de la tabla de operación depende del nodo (Quito vs Guayaquil)
-const TABLA_OP = NODO_SEDE === 1 ? 'EJEMPLAR_Operacion' : 'EJEMPLAR_Operacion_Guayaquil';
-
 // ===== CRUD de ESTUDIANTE (fragmentación horizontal, local al nodo) =====
 router.post('/estudiantes', async (req, res) => {
   const { nombre, carrera, correo } = req.body;
@@ -223,7 +236,7 @@ router.post('/estudiantes', async (req, res) => {
       .input('carrera', sql.VarChar(150), carrera)
       .input('correo', sql.VarChar(150), correo)
       .input('id_sede', sql.Int, NODO_SEDE)
-      .query(`INSERT INTO ESTUDIANTE (nombre, carrera, correo, id_sede)
+      .query(`INSERT INTO ${T.estudiante} (nombre, carrera, correo, id_sede)
               OUTPUT INSERTED.id_estudiante
               VALUES (@nombre, @carrera, @correo, @id_sede)`);
     res.json({ ok: true, id_estudiante: r.recordset[0].id_estudiante });
@@ -239,7 +252,7 @@ router.put('/estudiantes', async (req, res) => {
       .input('nombre', sql.VarChar(150), nombre)
       .input('carrera', sql.VarChar(150), carrera)
       .input('correo', sql.VarChar(150), correo)
-      .query(`UPDATE ESTUDIANTE SET nombre=@nombre, carrera=@carrera, correo=@correo
+      .query(`UPDATE ${T.estudiante} SET nombre=@nombre, carrera=@carrera, correo=@correo
               WHERE id_estudiante=@id_estudiante`);
     res.json({ ok: true, filas: r.rowsAffected[0] });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -251,7 +264,7 @@ router.delete('/estudiantes', async (req, res) => {
     const pool = await getPool();
     const r = await pool.request()
       .input('id_estudiante', sql.Int, id_estudiante)
-      .query(`DELETE FROM ESTUDIANTE WHERE id_estudiante=@id_estudiante`);
+      .query(`DELETE FROM ${T.estudiante} WHERE id_estudiante=@id_estudiante`);
     res.json({ ok: true, filas: r.rowsAffected[0] });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
