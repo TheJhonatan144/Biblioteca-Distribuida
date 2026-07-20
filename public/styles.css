@@ -513,3 +513,11 @@ td:last-child {
   text-align: center;
   font-size: 13px;
 }
+
+/* Layout de una sola columna (tras retirar la ficha técnica lateral) */
+.single-col {
+  display: block;
+}
+.single-col > div {
+  width: 100%;
+}

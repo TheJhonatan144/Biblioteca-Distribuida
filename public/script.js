@@ -42,17 +42,12 @@ const routes = [
   { id: 'sede-libro', label: 'Sedes y Libros', icon: '≡' },
   { id: 'estudiantes', label: 'Estudiantes', icon: '♙' },
   { id: 'prestamos', label: 'Préstamos', icon: '▣' },
-  { id: 'ejemplares', label: 'Ejemplares (Vista Particionada)', icon: '⌁' },
-  { id: 'consulta-remota', label: 'Disponibilidad / Auditoría', icon: '◎' },
+  { id: 'ejemplares', label: 'Ejemplares', icon: '⌁' },
+  { id: 'consulta-remota', label: 'Disponibilidad', icon: '◎' },
 ];
 
 function techCard(rows) {
-  return `
-    <aside class="card tech-card">
-      <div class="label">• Etiqueta técnica</div>
-      ${rows.map(([k, v]) => `<div class="tech-row"><b>${k}</b><span>${v}</span></div>`).join('')}
-    </aside>
-  `;
+  return '';
 }
 
 function field(label, value = '', type = 'text', readonly = false) {
@@ -151,7 +146,7 @@ async function dashboard() {
   }
 
   const content = `
-    ${pageHeader('02 · Dashboard', 'Resumen general', 'Consulta el estado actual de la biblioteca, los préstamos activos y la actividad reciente de la sede seleccionada.')}
+    ${pageHeader('', 'Resumen general', 'Estado actual de la biblioteca, préstamos activos y actividad reciente.')}
     <div class="grid grid-4">
       ${metric('Libros en catálogo', m.libros, 'Catálogo disponible')}
       ${metric('Estudiantes registrados', m.estudiantes, state.node)}
@@ -159,7 +154,7 @@ async function dashboard() {
       ${metric('Préstamos activos', m.prestamos_activos, state.node)}
     </div>
     <br />
-    <div class="layout-with-aside">
+    <div class="single-col">
       <div>
         <h3>Actividad reciente</h3>
         ${table(['Fecha','Módulo','Acción','Sede'], [
@@ -191,19 +186,19 @@ async function sedeLibro() {
 
   // En Guayaquil: solo lectura (replicado). En Quito: botones activos.
   const botonesLibro = readonly
-    ? '<div class="note">En Guayaquil, LIBRO es de solo lectura (llega por replicación desde Quito).</div>'
+    ? '<div class="note">En esta sede el catálogo se muestra solo para consulta.</div>'
     : `<div class="actions">
         <button class="btn btn-primary" onclick="crearLibro()">Registrar</button>
         <button class="btn btn-secondary" onclick="editarLibro()">Actualizar</button>
         <button class="btn btn-secondary" onclick="eliminarLibro()">Eliminar</button>
       </div><div id="libro_msg" class="help"></div>`;
-      const botonesSede = '<div class="note">SEDE es una tabla de catálogo fija del sistema: solo Quito(1) y Guayaquil(2). Se muestra en modo consulta.</div>';
+      const botonesSede = '<div class="note">Las sedes son fijas y se muestran solo para consulta.</div>';
 
   const content = `
-    ${pageHeader('03 · Sedes y Libros', 'Sedes y catálogo', 'Administra las sedes y el catálogo general de libros.')}
+    ${pageHeader('', 'Sedes y catálogo', 'Administra el catálogo de libros de la biblioteca.')}
     ${guardGuayaquil()}
-    <div class="note">Estas tablas se replican desde Quito hacia Guayaquil. La escritura ocurre en Quito; Guayaquil las consulta.</div><br />
-    <div class="layout-with-aside">
+    
+    <div class="single-col">
       <div class="grid">
         <div class="card">
           <div class="section-title">LIBRO</div>
@@ -280,9 +275,9 @@ async function estudiantes() {
   } catch (err) { tabla = errorBox('No se pudo conectar con el servidor.'); }
 
   const content = `
-    ${pageHeader('04 · Estudiantes', 'Gestión de estudiantes', 'Registra, consulta y actualiza los estudiantes de la sede local.')}
+    ${pageHeader('', 'Estudiantes', 'Registra, consulta y actualiza la información de los estudiantes.')}
     ${guardGuayaquil()}
-    <div class="layout-with-aside">
+    <div class="single-col">
       <div class="grid">
         <div class="card">
           <div class="form-grid">
@@ -360,10 +355,10 @@ async function prestamos() {
   }
 
   const content = `
-    ${pageHeader('05 · Préstamos', 'Gestión de préstamos', 'Registra préstamos, devoluciones y consultas de libros solicitados por los estudiantes.')}
+    ${pageHeader('', 'Préstamos', 'Registra préstamos, devoluciones y consulta el historial.')}
     ${guardGuayaquil()}
-    <div class="note">Cuando un estudiante solicita un libro de otra sede, el sistema registra el préstamo en la sede a la que pertenece el estudiante.</div><br />
-    <div class="layout-with-aside">
+    
+    <div class="single-col">
       <div class="grid">
         <div class="card">
           <div class="form-grid">
@@ -409,12 +404,12 @@ async function ejemplarIdentificacion() {
 
   const bloqueGuayaquil = `
         <div class="card">
-          <div class="note">La identificación física de los ejemplares está <b>centralizada en el nodo Quito</b>. Este fragmento (fragmentación vertical) reside únicamente en Quito, que mantiene el inventario general de ambas sedes. Desde Guayaquil no se administra localmente.</div>
+          <div class="note">La identificación de ejemplares se administra desde la sede principal (Quito).</div>
         </div>`;
 
   const content = `
-    ${pageHeader('06 · Identificación de ejemplares', 'Identificación física de ejemplares', 'Registra el código físico o de inventario de cada ejemplar.')}
-    <div class="layout-with-aside">
+    ${pageHeader('', 'Identificación de ejemplares', 'Registra el código de inventario de cada ejemplar.')}
+    <div class="single-col">
       <div class="grid">
         ${esQuito ? bloqueQuito : bloqueGuayaquil}
       </div>
@@ -473,27 +468,27 @@ async function ejemplaresUnificado() {
       e.codigo_ejemplar || '—',
       chip(e.estado)
     ]);
-    tabla = rows.length ? table(['ID libro','Nro. ejemplar','Sede','Código (Quito)','Estado'], rows)
+    tabla = rows.length ? table(['ID libro','Nro. ejemplar','Sede','Código','Estado'], rows)
                         : errorBox('No hay ejemplares registrados.');
   } catch (err) {
     tabla = errorBox('No se pudo leer la vista global. Verifica que Guayaquil esté en línea (la vista distribuida necesita ambos nodos).');
   }
 
   const content = `
-    ${pageHeader('06/07 · Ejemplares (Vista Particionada)', 'Registro unificado de ejemplares', 'Una sola pantalla captura todos los datos del ejemplar. El aplicativo reparte cada parte a su fragmento: el código físico va a la identificación centralizada en Quito (ruta completa), y la operación se registra en la vista particionada, que decide el nodo según la sede.')}
-    <div class="note">El registro se realiza en <b>una transacción distribuida</b>: el código (fragmentación vertical → Quito) y la operación (fragmentación mixta → vista particionada) se guardan juntos o no se guardan. Requiere ambos nodos en línea.</div><br />
-    <div class="layout-with-aside">
+    ${pageHeader('', 'Ejemplares', 'Registra un ejemplar con su código, sede y estado.')}
+    
+    <div class="single-col">
       <div class="grid">
         <div class="card">
           <div class="section-title">Registrar ejemplar</div>
           <div class="form-grid">
             <div class="field"><label>ID libro</label><input class="input" id="ej_id_libro" type="number" placeholder="Ej. 1" /></div>
-            <div class="field"><label>Nro. ejemplar</label><input class="input" id="ej_nro" type="number" placeholder="Impar=Quito, Par=Guayaquil" /></div>
-            <div class="field"><label>Sede (fragmento operativo)</label><select class="select" id="ej_sede"><option value="1">Quito (1)</option><option value="2">Guayaquil (2)</option></select></div>
-            <div class="field"><label>Código ejemplar (va a Quito)</label><input class="input" id="ej_codigo" type="text" placeholder="Ej. UIO-LIB001-EJ003" /></div>
+            <div class="field"><label>Nro. ejemplar</label><input class="input" id="ej_nro" type="number" placeholder="Ej. 3" /></div>
+            <div class="field"><label>Sede</label><select class="select" id="ej_sede"><option value="1">Quito</option><option value="2">Guayaquil</option></select></div>
+            <div class="field"><label>Código ejemplar</label><input class="input" id="ej_codigo" type="text" placeholder="Ej. UIO-LIB001-EJ003" /></div>
             <div class="field"><label>Estado</label><select class="select" id="ej_estado"><option>DISPONIBLE</option><option>PRESTADO</option><option>RESERVADO</option><option>MANTENIMIENTO</option></select></div>
           </div>
-          <div class="actions"><button class="btn btn-primary" onclick="registrarEjemplar()">Registrar en la vista particionada</button></div>
+          <div class="actions"><button class="btn btn-primary" onclick="registrarEjemplar()">Registrar ejemplar</button></div>
           <div id="ej_msg" class="help"></div>
         </div>
         ${tabla}
@@ -552,20 +547,20 @@ async function consultaRemota() {
   }
 
   const content = `
-    ${pageHeader('08 · Consulta de disponibilidad remota / Auditoría', 'Disponibilidad remota y auditoría', 'Consulta ejemplares disponibles en otra sede y valida que los registros del sistema se mantengan correctos entre Quito y Guayaquil.')}
-    <div class="layout-with-aside">
+    ${pageHeader('', 'Disponibilidad', 'Consulta la disponibilidad de ejemplares en la otra sede.')}
+    <div class="single-col">
       <div class="grid">
         <div class="card">
           <div class="section-title">Consulta de disponibilidad remota</div>
-          <div class="note">Esta sección consulta la vista particionada distribuida y requiere que el nodo Guayaquil esté en línea. Se demuestra en la sesión coordinada con el nodo remoto.</div>
+          <div class="note">Consulta la disponibilidad de ejemplares en la otra sede.</div>
         </div>
 
-        <div class="section-title">Auditoría de fragmentación (nodo local)</div>
+        <div class="section-title">Verificación del sistema</div>
         ${auditMetrics}
         ${validationTable}
 
         <div class="card soft-panel">
-          <div class="section-title">Resumen de la pantalla</div>
+          <div class="section-title">Resumen</div>
           <p class="help">La auditoría valida que las reglas de distribución se cumplan en el nodo local: cada estudiante, ejemplar y préstamo pertenece a la sede correcta. La consulta de disponibilidad remota (vista particionada) se ejecuta con el nodo Guayaquil en línea.</p>
         </div>
       </div>
