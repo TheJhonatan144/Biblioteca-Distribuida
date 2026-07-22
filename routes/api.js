@@ -394,4 +394,91 @@ router.delete('/ejemplares-global', async (req, res) => {
   }
 });
 
+// ===== PRESTAMOS: registro y devolucion (transaccion distribuida) =====
+
+// POST: registrar un prestamo. LOCAL si el ejemplar es de esta sede, REMOTO si es de la otra.
+//  (1) Reserva el ejemplar via la VISTA particionada (ella enruta al nodo dueno)
+//  (2) Inserta el prestamo en el fragmento del nodo del estudiante
+//  Ambas cosas en UNA transaccion distribuida: o las dos, o ninguna.
+router.post('/prestamos', async (req, res) => {
+  const { id_estudiante, id_libro, nro_ejemplar, id_sede_proveedora, fecha_devolucion } = req.body;
+  if (!id_estudiante || !id_libro || !nro_ejemplar || !id_sede_proveedora) {
+    return res.status(400).json({ error: 'Se requieren id_estudiante, id_libro, nro_ejemplar e id_sede_proveedora.' });
+  }
+  const tipo = (parseInt(id_sede_proveedora, 10) === NODO_SEDE) ? 'LOCAL' : 'REMOTO';
+  try {
+    const pool = await getPool();
+    const rq = pool.request();
+    rq.input('ie', sql.Int, id_estudiante);
+    rq.input('il', sql.Int, id_libro);
+    rq.input('ne', sql.Int, nro_ejemplar);
+    rq.input('prov', sql.Int, id_sede_proveedora);
+    rq.input('tipo', sql.VarChar(20), tipo);
+    rq.input('fdev', sql.VarChar(30), fecha_devolucion || null);
+    const r = await rq.query(`
+      SET XACT_ABORT ON;
+      BEGIN DISTRIBUTED TRANSACTION;
+
+        UPDATE V_EJEMPLAR_Operacion_Global
+        SET estado = 'PRESTADO'
+        WHERE id_libro = @il AND nro_ejemplar = @ne
+          AND id_sede = @prov AND estado = 'DISPONIBLE';
+
+        IF @@ROWCOUNT = 0
+            THROW 50001, 'El ejemplar no existe en esa sede o no esta DISPONIBLE.', 1;
+
+        INSERT INTO ${T.prestamo}
+          (fecha_prestamo, fecha_devolucion, estado, tipo_prestamo,
+           id_estudiante, id_libro, nro_ejemplar, id_sede_origen, id_sede_proveedora)
+        OUTPUT INSERTED.id_prestamo
+        VALUES
+          (GETDATE(), COALESCE(TRY_CONVERT(date, @fdev), DATEADD(day, 7, GETDATE())),
+           'ACTIVO', @tipo, @ie, @il, @ne, ${NODO_SEDE}, @prov);
+
+      COMMIT TRANSACTION;
+    `);
+    const id = (r.recordset && r.recordset[0]) ? r.recordset[0].id_prestamo : null;
+    res.json({ ok: true, tipo, id_prestamo: id });
+  } catch (err) {
+    console.error('Error registrar prestamo:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT: registrar la devolucion. Marca el prestamo DEVUELTO y libera el ejemplar
+// en su nodo (via la vista). Tambien en una transaccion distribuida.
+router.put('/prestamos/devolucion', async (req, res) => {
+  const { id_prestamo } = req.body;
+  if (!id_prestamo) return res.status(400).json({ error: 'Se requiere el id_prestamo.' });
+  try {
+    const pool = await getPool();
+    const rq = pool.request();
+    rq.input('ip', sql.Int, id_prestamo);
+    await rq.query(`
+      DECLARE @il INT, @ne INT, @prov INT;
+      SET XACT_ABORT ON;
+      BEGIN DISTRIBUTED TRANSACTION;
+
+        SELECT @il = id_libro, @ne = nro_ejemplar, @prov = id_sede_proveedora
+        FROM ${T.prestamo}
+        WHERE id_prestamo = @ip AND estado = 'ACTIVO';
+
+        IF @il IS NULL
+            THROW 50002, 'No existe un prestamo ACTIVO con ese identificador en este nodo.', 1;
+
+        UPDATE ${T.prestamo} SET estado = 'DEVUELTO' WHERE id_prestamo = @ip;
+
+        UPDATE V_EJEMPLAR_Operacion_Global
+        SET estado = 'DISPONIBLE'
+        WHERE id_libro = @il AND nro_ejemplar = @ne AND id_sede = @prov;
+
+      COMMIT TRANSACTION;
+    `);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error devolucion:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

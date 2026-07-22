@@ -23,11 +23,23 @@ async function apiSend(path, method, body) {
   return data;
 }
 
-// Aviso reutilizable cuando el nodo Guayaquil aun no esta conectado.
-function guardGuayaquil() {
-  return state.node === 'Guayaquil'
-    ? '<div class="note">El nodo Guayaquil se conectara mas adelante (cuando enlacemos su base). Por ahora prueba en modo <b>Quito</b>; los datos mostrados provienen de Biblioteca_Quito.</div><br />'
-    : '';
+// (Los dos nodos estan operativos; ya no se requiere aviso por sede.)
+function guardGuayaquil() { return ''; }
+
+// ===== Notificaciones flotantes (toasts) =====
+// Sobreviven al re-render porque viven en document.body, no dentro de #app.
+function toast(mensaje, ok = true) {
+  let cont = document.getElementById('toast-container');
+  if (!cont) {
+    cont = document.createElement('div');
+    cont.id = 'toast-container';
+    document.body.appendChild(cont);
+  }
+  const t = document.createElement('div');
+  t.className = 'toast ' + (ok ? 'toast-ok' : 'toast-error');
+  t.innerHTML = (ok ? '✓ ' : '✕ ') + mensaje;
+  cont.appendChild(t);
+  setTimeout(() => { t.classList.add('toast-out'); setTimeout(() => t.remove(), 350); }, 3800);
 }
 function errorBox(msg) {
   return `<div class="note">⚠ ${msg}</div>`;
@@ -233,20 +245,21 @@ function leerLibro() {
     categoria: document.getElementById('libro_categoria').value.trim()
   };
 }
-function msgLibro(t, ok=true){ const e=document.getElementById('libro_msg'); if(e){e.textContent=t; e.style.color=ok?'seagreen':'crimson';} }
+function msgLibro(t, ok=true){ toast(t, ok); }
 async function crearLibro(){
   const d = leerLibro();
   if(!d.titulo) return msgLibro('El Título es obligatorio.', false);
   try{
     const r = await apiSend('/libros','POST',{ titulo:d.titulo, autor:d.autor, categoria:d.categoria });
+    msgLibro('Libro registrado correctamente (ID ' + r.id_libro + ').');
     await render();
   }catch(e){ msgLibro('Error: '+e.message, false); }
 }
 async function editarLibro(){ const d=leerLibro(); if(!d.id_libro) return msgLibro('Indica el ID libro a actualizar.',false);
-  try{ const r=await apiSend('/libros','PUT',d); if(r.filas===0) return msgLibro('No existe ese libro.',false); await render(); }catch(e){ msgLibro('Error: '+e.message,false); } }
+  try{ const r=await apiSend('/libros','PUT',d); if(r.filas===0) return msgLibro('No existe ese libro.',false); msgLibro('Libro actualizado correctamente.'); await render(); }catch(e){ msgLibro('Error: '+e.message,false); } }
 async function eliminarLibro(){ const d=leerLibro(); if(!d.id_libro) return msgLibro('Indica el ID libro a eliminar.',false);
   if(!confirm('¿Eliminar el libro '+d.id_libro+'?')) return;
-  try{ const r=await apiSend('/libros','DELETE',{id_libro:d.id_libro}); if(r.filas===0) return msgLibro('No existe ese libro.',false); await render(); }catch(e){ msgLibro('Error: '+e.message,false); } }
+  try{ const r=await apiSend('/libros','DELETE',{id_libro:d.id_libro}); if(r.filas===0) return msgLibro('No existe ese libro.',false); msgLibro('Libro eliminado correctamente.'); await render(); }catch(e){ msgLibro('Error: '+e.message,false); } }
 
 // --- CRUD SEDE ---
 function leerSede() {
@@ -256,7 +269,7 @@ function leerSede() {
     ciudad: document.getElementById('sede_ciudad').value.trim()
   };
 }
-function msgSede(t, ok=true){ const e=document.getElementById('sede_msg'); if(e){e.textContent=t; e.style.color=ok?'seagreen':'crimson';} }
+function msgSede(t, ok=true){ toast(t, ok); }
 async function crearSede(){ const d=leerSede(); if(!d.id_sede||!d.nombre) return msgSede('ID sede y Nombre son obligatorios.',false);
   try{ await apiSend('/sedes','POST',d); await render(); }catch(e){ msgSede('Error: '+e.message,false); } }
 async function editarSede(){ const d=leerSede(); if(!d.id_sede) return msgSede('Indica el ID sede a actualizar.',false);
@@ -312,67 +325,106 @@ function leerEstudiante(){
     correo: document.getElementById('est_correo').value.trim()
   };
 }
-function msgEst(t, ok=true){ const e=document.getElementById('est_msg'); if(e){ e.textContent=t; e.style.color=ok?'seagreen':'crimson'; } }
+function msgEst(t, ok=true){ toast(t, ok); }
 async function crearEstudiante(){
   const d = leerEstudiante();
   if(!d.nombre) return msgEst('El nombre es obligatorio.', false);
-  try{ await apiSend('/estudiantes','POST',{ nombre:d.nombre, carrera:d.carrera, correo:d.correo }); await render(); }
+  try{ const r = await apiSend('/estudiantes','POST',{ nombre:d.nombre, carrera:d.carrera, correo:d.correo }); msgEst('Estudiante registrado correctamente (ID ' + r.id_estudiante + ').'); await render(); }
   catch(e){ msgEst('Error: '+e.message, false); }
 }
 async function editarEstudiante(){
   const d = leerEstudiante();
   if(!d.id_estudiante) return msgEst('Indica el ID del estudiante a actualizar.', false);
-  try{ const r=await apiSend('/estudiantes','PUT',d); if(r.filas===0) return msgEst('No existe ese estudiante.', false); await render(); }
+  try{ const r=await apiSend('/estudiantes','PUT',d); if(r.filas===0) return msgEst('No existe ese estudiante.', false); msgEst('Estudiante actualizado correctamente.'); await render(); }
   catch(e){ msgEst('Error: '+e.message, false); }
 }
 async function eliminarEstudiante(){
   const d = leerEstudiante();
   if(!d.id_estudiante) return msgEst('Indica el ID del estudiante a eliminar.', false);
   if(!confirm('¿Eliminar el estudiante '+d.id_estudiante+'?')) return;
-  try{ const r=await apiSend('/estudiantes','DELETE',{id_estudiante:d.id_estudiante}); if(r.filas===0) return msgEst('No existe ese estudiante.', false); await render(); }
+  try{ const r=await apiSend('/estudiantes','DELETE',{id_estudiante:d.id_estudiante}); if(r.filas===0) return msgEst('No existe ese estudiante.', false); msgEst('Estudiante eliminado correctamente.'); await render(); }
   catch(e){ msgEst('Error: '+e.message, false); }
 }
 
 async function prestamos() {
-  let tablaPrestamos;
+  let tabla;
   try {
     const data = await apiGet('/prestamos');
     const rows = data.map(p => [
-      p.id_prestamo,
-      p.id_estudiante,
-      p.id_libro,
-      p.nro_ejemplar,
+      p.id_prestamo, p.id_estudiante, p.id_libro, p.nro_ejemplar,
       p.id_sede_origen === 1 ? 'Quito' : 'Guayaquil',
       p.id_sede_proveedora === 1 ? 'Quito' : 'Guayaquil',
-      chip(p.tipo_prestamo),
-      chip(p.estado)
+      chip(p.tipo_prestamo), chip(p.estado)
     ]);
-    tablaPrestamos = rows.length
-      ? table(['ID préstamo','Estudiante','Libro','Ejemplar','Sede estudiante','Sede proveedora','Tipo','Estado'], rows)
-      : errorBox('No hay préstamos registrados en este nodo.');
-  } catch (err) {
-    tablaPrestamos = errorBox('No se pudo conectar con el servidor. Verifica que el backend esté corriendo (npm start).');
-  }
+    tabla = rows.length
+      ? table(['ID','Estudiante','Libro','Ejemplar','Sede estudiante','Sede proveedora','Tipo','Estado'], rows)
+      : errorBox('No hay prestamos registrados en esta sede.');
+  } catch (err) { tabla = errorBox('No se pudo conectar con el servidor.'); }
 
   const content = `
     ${pageHeader('', 'Préstamos', 'Registra préstamos, devoluciones y consulta el historial.')}
-    ${guardGuayaquil()}
-    
     <div class="single-col">
       <div class="grid">
         <div class="card">
+          <div class="section-title">Registrar préstamo</div>
           <div class="form-grid">
-            ${field('ID préstamo')}${field('Fecha préstamo', '2026-06-27', 'date')}${field('Fecha devolución', '2026-07-04', 'date')}${selectField('Estado', ['ACTIVO','DEVUELTO','CANCELADO'], 'ACTIVO')}${selectField('Tipo de préstamo', ['LOCAL','REMOTO'], 'LOCAL')}${field('ID estudiante')}${field('ID libro')}${field('Nro. ejemplar')}${field('Sede del estudiante', state.node, 'text', true)}${selectField('Sede proveedora', [state.node, otherNode()], state.node)}
+            <div class="field"><label>ID estudiante</label><input class="input" id="pr_est" type="number" placeholder="Ej. 1" /></div>
+            <div class="field"><label>ID libro</label><input class="input" id="pr_libro" type="number" placeholder="Ej. 1" /></div>
+            <div class="field"><label>Nro. ejemplar</label><input class="input" id="pr_nro" type="number" placeholder="Ej. 2" /></div>
+            <div class="field"><label>Sede del ejemplar</label><select class="select" id="pr_prov"><option value="1">Quito</option><option value="2">Guayaquil</option></select></div>
+            <div class="field"><label>Fecha de devolución</label><input class="input" id="pr_fdev" type="date" /></div>
+            <div class="field"><label>Sede del estudiante</label><input class="input" value="${state.node}" readonly /></div>
           </div>
-          ${actions(['Registrar préstamo', 'Registrar devolución', 'Buscar préstamo', 'Cancelar préstamo'])}
+          <div class="actions">
+            <button class="btn btn-primary" onclick="registrarPrestamo()">Registrar préstamo</button>
+          </div>
+          <div id="pr_msg" class="help"></div>
         </div>
-        ${tablaPrestamos}
+
+        <div class="card">
+          <div class="section-title">Registrar devolución</div>
+          <div class="form-grid">
+            <div class="field"><label>ID préstamo</label><input class="input" id="pr_dev_id" type="number" placeholder="Ej. 5" /></div>
+          </div>
+          <div class="actions">
+            <button class="btn btn-secondary" onclick="registrarDevolucion()">Registrar devolución</button>
+          </div>
+          <div id="pr_dev_msg" class="help"></div>
+        </div>
+
+        ${tabla}
       </div>
-      ${techCard([
-        ['Nodo:', state.node], ['Tabla:', 'PRESTAMO'], ['Tipo de fragmentación:', 'Fragmentación horizontal derivada'], ['Derivada desde:', 'ESTUDIANTE'], ['Condición:', 'Préstamos originados por estudiantes del nodo local'], ['Operaciones:', 'Registrar, consultar, devolver y cancelar préstamos']
-      ])}
     </div>`;
   return shell(content, 'prestamos');
+}
+
+function msgPr(id, t, ok) { toast(t, ok); }
+
+async function registrarPrestamo() {
+  const d = {
+    id_estudiante: parseInt(document.getElementById('pr_est').value, 10),
+    id_libro: parseInt(document.getElementById('pr_libro').value, 10),
+    nro_ejemplar: parseInt(document.getElementById('pr_nro').value, 10),
+    id_sede_proveedora: parseInt(document.getElementById('pr_prov').value, 10),
+    fecha_devolucion: document.getElementById('pr_fdev').value || null
+  };
+  if (!d.id_estudiante || !d.id_libro || !d.nro_ejemplar)
+    return msgPr('pr_msg', 'Completa ID estudiante, ID libro y Nro. ejemplar.', false);
+  try {
+    const r = await apiSend('/prestamos', 'POST', d);
+    msgPr('pr_msg', `Préstamo ${r.tipo} registrado correctamente (ID ${r.id_prestamo ?? '-'}).`, true);
+    await render();
+  } catch (err) { msgPr('pr_msg', 'Error: ' + err.message, false); }
+}
+
+async function registrarDevolucion() {
+  const id_prestamo = parseInt(document.getElementById('pr_dev_id').value, 10);
+  if (!id_prestamo) return msgPr('pr_dev_msg', 'Indica el ID del préstamo a devolver.', false);
+  try {
+    await apiSend('/prestamos/devolucion', 'PUT', { id_prestamo });
+    msgPr('pr_dev_msg', 'Devolución registrada. El ejemplar volvió a estar DISPONIBLE.', true);
+    await render();
+  } catch (err) { msgPr('pr_dev_msg', 'Error: ' + err.message, false); }
 }
 
 async function ejemplarIdentificacion() {
@@ -428,14 +480,11 @@ function leerIdent() {
     codigo_ejemplar: document.getElementById('ident_codigo').value.trim()
   };
 }
-function msgIdent(texto, ok = true) {
-  const el = document.getElementById('ident_msg');
-  if (el) { el.textContent = texto; el.style.color = ok ? 'seagreen' : 'crimson'; }
-}
+function msgIdent(texto, ok = true) { toast(texto, ok); }
 async function crearIdentificacion() {
   const d = leerIdent();
   if (!d.id_libro || !d.nro_ejemplar || !d.codigo_ejemplar) return msgIdent('Completa los tres campos.', false);
-  try { await apiSend('/ejemplares-identificacion', 'POST', d); await render(); }
+  try { await apiSend('/ejemplares-identificacion', 'POST', d); msgIdent('Identificación registrada correctamente.'); await render(); }
   catch (err) { msgIdent('Error: ' + err.message, false); }
 }
 async function editarIdentificacion() {
@@ -444,6 +493,7 @@ async function editarIdentificacion() {
   try {
     const r = await apiSend('/ejemplares-identificacion', 'PUT', d);
     if (r.filas === 0) return msgIdent('No existe ese ejemplar para actualizar.', false);
+    msgIdent('Código actualizado correctamente.');
     await render();
   } catch (err) { msgIdent('Error: ' + err.message, false); }
 }
@@ -454,6 +504,7 @@ async function eliminarIdentificacion() {
   try {
     const r = await apiSend('/ejemplares-identificacion', 'DELETE', d);
     if (r.filas === 0) return msgIdent('No existe ese ejemplar para eliminar.', false);
+    msgIdent('Ejemplar eliminado de la identificación.');
     await render();
   } catch (err) { msgIdent('Error: ' + err.message, false); }
 }
@@ -516,11 +567,11 @@ async function registrarEjemplar() {
     estado: document.getElementById('ej_estado').value
   };
   const msg = document.getElementById('ej_msg');
-  const setMsg = (t, ok) => { msg.textContent = t; msg.style.color = ok ? 'seagreen' : 'crimson'; };
+  const setMsg = (t, ok) => toast(t, ok);
   if (!d.id_libro || !d.nro_ejemplar || !d.codigo_ejemplar) return setMsg('Completa ID libro, Nro. ejemplar y Código.', false);
   try {
     await apiSend('/ejemplares-global', 'POST', d);
-    setMsg('Registrado correctamente en ambos fragmentos.', true);
+    setMsg('Ejemplar registrado correctamente.', true);
     await render();
   } catch (err) { setMsg('Error: ' + err.message, false); }
 }
@@ -538,7 +589,7 @@ function leerEjemplar() {
 async function actualizarEjemplar() {
   const d = leerEjemplar();
   const msg = document.getElementById('ej_msg');
-  const setMsg = (t, ok) => { msg.textContent = t; msg.style.color = ok ? 'seagreen' : 'crimson'; };
+  const setMsg = (t, ok) => toast(t, ok);
   if (!d.id_libro || !d.nro_ejemplar) return setMsg('Indica ID libro y Nro. ejemplar del ejemplar a actualizar.', false);
   if (!d.id_sede) return setMsg('Indica la Sede del ejemplar a actualizar.', false);
   try {
@@ -554,12 +605,12 @@ async function actualizarEjemplar() {
 async function eliminarEjemplar() {
   const d = leerEjemplar();
   const msg = document.getElementById('ej_msg');
-  const setMsg = (t, ok) => { msg.textContent = t; msg.style.color = ok ? 'seagreen' : 'crimson'; };
+  const setMsg = (t, ok) => toast(t, ok);
   if (!d.id_libro || !d.nro_ejemplar || !d.id_sede) return setMsg('Indica ID libro, Nro. ejemplar y Sede del ejemplar a eliminar.', false);
   if (!confirm('¿Eliminar el ejemplar ' + d.id_libro + '-' + d.nro_ejemplar + ' de ' + (d.id_sede === 1 ? 'Quito' : 'Guayaquil') + '? Se borrará su código y su operación.')) return;
   try {
     await apiSend('/ejemplares-global', 'DELETE', d);
-    setMsg('Ejemplar eliminado correctamente de ambos fragmentos.', true);
+    setMsg('Ejemplar eliminado correctamente.', true);
     await render();
   } catch (err) { setMsg('Error: ' + err.message, false); }
 }
