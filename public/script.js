@@ -488,8 +488,11 @@ async function ejemplaresUnificado() {
             <div class="field"><label>Código ejemplar</label><input class="input" id="ej_codigo" type="text" placeholder="Ej. UIO-LIB001-EJ003" /></div>
             <div class="field"><label>Estado</label><select class="select" id="ej_estado"><option>DISPONIBLE</option><option>PRESTADO</option><option>RESERVADO</option><option>MANTENIMIENTO</option></select></div>
           </div>
-          <div class="actions"><button class="btn btn-primary" onclick="registrarEjemplar()">Registrar ejemplar</button></div>
-          <div id="ej_msg" class="help"></div>
+          <div class="actions">
+            <button class="btn btn-primary" onclick="registrarEjemplar()">Registrar</button>
+            <button class="btn btn-secondary" onclick="actualizarEjemplar()">Actualizar</button>
+            <button class="btn btn-secondary" onclick="eliminarEjemplar()">Eliminar</button>
+          </div>
         </div>
         ${tabla}
       </div>
@@ -518,6 +521,45 @@ async function registrarEjemplar() {
   try {
     await apiSend('/ejemplares-global', 'POST', d);
     setMsg('Registrado correctamente en ambos fragmentos.', true);
+    await render();
+  } catch (err) { setMsg('Error: ' + err.message, false); }
+}
+
+function leerEjemplar() {
+  return {
+    id_libro: parseInt(document.getElementById('ej_id_libro').value, 10),
+    nro_ejemplar: parseInt(document.getElementById('ej_nro').value, 10),
+    id_sede: parseInt(document.getElementById('ej_sede').value, 10),
+    codigo_ejemplar: document.getElementById('ej_codigo').value.trim(),
+    estado: document.getElementById('ej_estado').value
+  };
+}
+
+async function actualizarEjemplar() {
+  const d = leerEjemplar();
+  const msg = document.getElementById('ej_msg');
+  const setMsg = (t, ok) => { msg.textContent = t; msg.style.color = ok ? 'seagreen' : 'crimson'; };
+  if (!d.id_libro || !d.nro_ejemplar) return setMsg('Indica ID libro y Nro. ejemplar del ejemplar a actualizar.', false);
+  if (!d.id_sede) return setMsg('Indica la Sede del ejemplar a actualizar.', false);
+  try {
+    const r = await apiSend('/ejemplares-global', 'PUT', d);
+    if ((r.filasCodigo || 0) === 0 && (r.filasEstado || 0) === 0) {
+      return setMsg('No existe ese ejemplar con ese id_libro, nro_ejemplar y sede.', false);
+    }
+    setMsg('Ejemplar actualizado correctamente.', true);
+    await render();
+  } catch (err) { setMsg('Error: ' + err.message, false); }
+}
+
+async function eliminarEjemplar() {
+  const d = leerEjemplar();
+  const msg = document.getElementById('ej_msg');
+  const setMsg = (t, ok) => { msg.textContent = t; msg.style.color = ok ? 'seagreen' : 'crimson'; };
+  if (!d.id_libro || !d.nro_ejemplar || !d.id_sede) return setMsg('Indica ID libro, Nro. ejemplar y Sede del ejemplar a eliminar.', false);
+  if (!confirm('¿Eliminar el ejemplar ' + d.id_libro + '-' + d.nro_ejemplar + ' de ' + (d.id_sede === 1 ? 'Quito' : 'Guayaquil') + '? Se borrará su código y su operación.')) return;
+  try {
+    await apiSend('/ejemplares-global', 'DELETE', d);
+    setMsg('Ejemplar eliminado correctamente de ambos fragmentos.', true);
     await render();
   } catch (err) { setMsg('Error: ' + err.message, false); }
 }

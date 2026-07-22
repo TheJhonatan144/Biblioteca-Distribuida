@@ -327,4 +327,71 @@ router.post('/ejemplares-global', async (req, res) => {
   }
 });
 
+// PUT: ACTUALIZAR un ejemplar (código en Quito + estado en la vista) — atómico.
+router.put('/ejemplares-global', async (req, res) => {
+  const { id_libro, nro_ejemplar, id_sede, codigo_ejemplar, estado } = req.body;
+  if (!id_libro || !nro_ejemplar || !id_sede) {
+    return res.status(400).json({ error: 'Se requieren id_libro, nro_ejemplar e id_sede.' });
+  }
+  try {
+    const pool = await getPool();
+    const request = pool.request();
+    request.input('il', sql.Int, id_libro);
+    request.input('ne', sql.Int, nro_ejemplar);
+    request.input('is', sql.Int, id_sede);
+    request.input('cod', sql.VarChar(100), codigo_ejemplar);
+    request.input('est', sql.VarChar(20), estado);
+    const r = await request.query(`
+      SET XACT_ABORT ON;
+      BEGIN DISTRIBUTED TRANSACTION;
+        UPDATE ${RUTA_IDENT} SET codigo_ejemplar = @cod
+        WHERE id_libro = @il AND nro_ejemplar = @ne;
+        UPDATE V_EJEMPLAR_Operacion_Global SET estado = @est
+        WHERE id_libro = @il AND nro_ejemplar = @ne AND id_sede = @is;
+      COMMIT TRANSACTION;
+    `);
+    // rowsAffected trae un conteo por sentencia DML del batch: [0]=UPDATE identificacion, [1]=UPDATE vista.
+    const filasCodigo = r.rowsAffected[0] || 0;
+    const filasEstado = r.rowsAffected[1] || 0;
+    if (filasCodigo === 0 && filasEstado === 0) {
+      return res.status(404).json({
+        error: 'No existe ningun ejemplar con ese id_libro, nro_ejemplar e id_sede.',
+        filasCodigo, filasEstado,
+      });
+    }
+    res.json({ ok: true, filasCodigo, filasEstado });
+  } catch (err) {
+    console.error('Error update ejemplar:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE: ELIMINAR un ejemplar completo (operacion via vista + identificacion en Quito) — atómico.
+router.delete('/ejemplares-global', async (req, res) => {
+  const { id_libro, nro_ejemplar, id_sede } = req.body;
+  if (!id_libro || !nro_ejemplar || !id_sede) {
+    return res.status(400).json({ error: 'Se requieren id_libro, nro_ejemplar e id_sede.' });
+  }
+  try {
+    const pool = await getPool();
+    const request = pool.request();
+    request.input('il', sql.Int, id_libro);
+    request.input('ne', sql.Int, nro_ejemplar);
+    request.input('is', sql.Int, id_sede);
+    await request.query(`
+      SET XACT_ABORT ON;
+      BEGIN DISTRIBUTED TRANSACTION;
+        DELETE FROM V_EJEMPLAR_Operacion_Global
+        WHERE id_libro = @il AND nro_ejemplar = @ne AND id_sede = @is;
+        DELETE FROM ${RUTA_IDENT}
+        WHERE id_libro = @il AND nro_ejemplar = @ne;
+      COMMIT TRANSACTION;
+    `);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error delete ejemplar:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
