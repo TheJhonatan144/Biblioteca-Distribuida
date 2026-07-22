@@ -92,10 +92,7 @@ function shell(content, active = 'dashboard') {
         <header class="topbar">
           <div class="top-kicker">Sistema Bibliotecario</div>
           <div class="top-actions">
-            <div class="node-toggle">
-              <button class="node-btn ${state.node === 'Quito' ? 'active' : ''}" onclick="setNode('Quito')">Quito</button>
-              <button class="node-btn ${state.node === 'Guayaquil' ? 'active' : ''}" onclick="setNode('Guayaquil')">Guayaquil</button>
-            </div>
+            <span class="status-pill">Sede: <b>&nbsp;${state.node}</b></span>
             <span class="status-pill"><span class="dot"></span> Sistema activo</span>
             <span class="status-pill">${state.role}</span>
             <span class="user-badge">${state.role[0]}</span>
@@ -130,7 +127,7 @@ function login() {
             ${field('Usuario', 'admin')}
             ${field('Contraseña', 'biblioteca', 'password')}
             <div class="form-grid">
-              ${selectField('Sede', ['Quito', 'Guayaquil'], state.node)}
+              ${field('Sede', state.node, 'text', true)}
               ${selectField('Rol', ['Administrador', 'Bibliotecario'], state.role)}
             </div>
             <button class="btn btn-primary full" onclick="readLoginAndGo()">Ingresar</button>
@@ -151,10 +148,35 @@ function metric(label, value, note) { return `<div class="card metric-card"><div
 
 async function dashboard() {
   let m = { libros: '—', estudiantes: '—', ejemplares_disponibles: '—', prestamos_activos: '—' };
+  try { m = await apiGet('/dashboard'); } catch (err) { /* se quedan los guiones */ }
+
+  // Actividad reciente construida con datos reales del nodo
+  let actividadTable;
   try {
-    m = await apiGet('/dashboard');
+    const act = await apiGet('/actividad');
+    const fmtFecha = (d) => {
+      if (!d) return '—';
+      const f = new Date(d);
+      return f.toLocaleDateString('es-EC', { day: '2-digit', month: '2-digit', year: 'numeric' })
+        + ' ' + f.toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit' });
+    };
+    const rows = [];
+    act.prestamos.forEach(p => {
+      const accion = 'Préstamo ' + p.tipo_prestamo + ' · libro ' + p.id_libro +
+                     ', ejemplar ' + p.nro_ejemplar +
+                     (p.estado === 'DEVUELTO' ? ' (devuelto)' : p.estado === 'CANCELADO' ? ' (cancelado)' : '');
+      rows.push([fmtFecha(p.fecha_prestamo), 'Préstamos', accion,
+                 chip(p.id_sede_origen === 1 ? 'Quito' : 'Guayaquil')]);
+    });
+    act.estudiantes.forEach(e =>
+      rows.push(['—', 'Estudiantes', 'Estudiante registrado: ' + e.nombre, chip(state.node)]));
+    act.libros.forEach(l =>
+      rows.push(['—', 'Catálogo', 'Libro en catálogo: ' + l.titulo, chip('Quito')]));
+    actividadTable = rows.length
+      ? table(['Fecha', 'Módulo', 'Acción', 'Sede'], rows)
+      : errorBox('Aún no hay actividad registrada en esta sede.');
   } catch (err) {
-    // si el backend no responde, se quedan los guiones
+    actividadTable = errorBox('No se pudo cargar la actividad reciente.');
   }
 
   const content = `
@@ -169,19 +191,12 @@ async function dashboard() {
     <div class="single-col">
       <div>
         <h3>Actividad reciente</h3>
-        ${table(['Fecha','Módulo','Acción','Sede'], [
-          ['27/06/2026 10:42','Préstamos','Registro de préstamo', chip(state.node)],
-          ['27/06/2026 10:18','Ejemplares','Estado actualizado a DISPONIBLE', chip(state.node)],
-          ['27/06/2026 09:55','Estudiantes','Nuevo estudiante registrado', chip(state.node)],
-          ['27/06/2026 09:12','Catálogo','Información actualizada', chip(otherNode())]
-        ])}
+        ${actividadTable}
       </div>
-      ${techCard([
-        ['Nodo:', state.node], ['Tabla:', 'SEDE, LIBRO, ESTUDIANTE, EJEMPLAR_OPERACION, PRESTAMO'], ['Tipo de fragmentación:', 'Resumen de datos distribuidos y replicados'], ['Operaciones:', 'Consultar estado general del sistema']
-      ])}
     </div>`;
   return shell(content, 'dashboard');
 }
+
 
 // ===== PANTALLA CONECTADA A LA API: Sedes y Libros =====
 async function sedeLibro() {
@@ -616,7 +631,21 @@ async function eliminarEjemplar() {
 }
 
 async function consultaRemota() {
-  let auditMetrics, validationTable;
+  const otraSede = otherNode();
+  let tablaRemota, auditMetrics, validationTable;
+
+  // 1) Disponibilidad remota (necesita el otro nodo en linea)
+  try {
+    const disp = await apiGet('/disponibilidad-remota');
+    const rows = disp.map(e => [e.id_libro, e.titulo, e.autor, e.nro_ejemplar, chip(e.estado)]);
+    tablaRemota = rows.length
+      ? table(['ID libro','Título','Autor','Nro. ejemplar','Estado'], rows)
+      : errorBox('No hay ejemplares disponibles en ' + otraSede + ' en este momento.');
+  } catch (err) {
+    tablaRemota = errorBox('No se pudo consultar la sede ' + otraSede + '. Verifica que su nodo esté en línea.');
+  }
+
+  // 2) Verificacion del sistema (local, siempre disponible)
   try {
     const a = await apiGet('/auditoria');
     const ok = (n) => n === 0;
@@ -635,31 +664,24 @@ async function consultaRemota() {
       ['Catálogo compartido', catalogoOk?'Correcto':'Vacío','La información de sedes y libros está disponible para consulta', chip('Aprobado')]
     ]);
   } catch (err) {
-    auditMetrics = errorBox('No se pudo conectar con el servidor para calcular la auditoría.');
+    auditMetrics = errorBox('No se pudo calcular la verificación del sistema.');
     validationTable = '';
   }
 
   const content = `
-    ${pageHeader('', 'Disponibilidad', 'Consulta la disponibilidad de ejemplares en la otra sede.')}
+    ${pageHeader('', 'Disponibilidad', 'Ejemplares disponibles en la sede ' + otraSede + ' que pueden solicitarse en préstamo.')}
     <div class="single-col">
       <div class="grid">
         <div class="card">
-          <div class="section-title">Consulta de disponibilidad remota</div>
-          <div class="note">Consulta la disponibilidad de ejemplares en la otra sede.</div>
+          <div class="section-title">Disponibles en ${otraSede}</div>
+          <p class="help">Estos ejemplares pueden solicitarse desde la pestaña Préstamos indicando la sede ${otraSede}.</p>
         </div>
+        ${tablaRemota}
 
-        <div class="section-title">Verificación del sistema</div>
+        <div class="section-title" style="margin-top:18px">Verificación del sistema</div>
         ${auditMetrics}
         ${validationTable}
-
-        <div class="card soft-panel">
-          <div class="section-title">Resumen</div>
-          <p class="help">La auditoría valida que las reglas de distribución se cumplan en el nodo local: cada estudiante, ejemplar y préstamo pertenece a la sede correcta. La consulta de disponibilidad remota (vista particionada) se ejecuta con el nodo Guayaquil en línea.</p>
-        </div>
       </div>
-      ${techCard([
-        ['Nodo:', state.node], ['Tabla:', 'ESTUDIANTE, EJEMPLAR_Operacion, PRESTAMO, SEDE, LIBRO'], ['Tipo de fragmentación:', 'Validación de reglas de fragmentación + consulta distribuida'], ['Operaciones:', 'Auditar distribución local y consultar disponibilidad remota']
-      ])}
     </div>`;
   return shell(content, 'consulta-remota');
 }
@@ -683,11 +705,16 @@ function go(route) { location.hash = '#/' + route; }
 function setNode(n) { state.node = n; localStorage.setItem('sbd-node', n); render(); }
 function readLoginAndGo() {
   const selects = document.querySelectorAll('select');
-  state.node = selects[0].value;
-  state.role = selects[1].value;
-  localStorage.setItem('sbd-node', state.node);
+  state.role = selects[0].value;               // ahora el unico select es el Rol
   localStorage.setItem('sbd-role', state.role);
   go('dashboard');
 }
 window.addEventListener('hashchange', render);
-render();
+(async function init() {
+  try {
+    const n = await apiGet('/nodo');
+    state.node = n.nombre;
+    localStorage.setItem('sbd-node', n.nombre);
+  } catch (e) { /* si el backend no responde, se usa el ultimo valor conocido */ }
+  render();
+})();

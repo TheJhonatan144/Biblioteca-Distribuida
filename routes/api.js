@@ -481,4 +481,50 @@ router.put('/prestamos/devolucion', async (req, res) => {
   }
 });
 
+router.get('/disponibilidad-remota', async (req, res) => {
+  const OTRA_SEDE = esQuito ? 2 : 1;
+  try {
+    const pool = await getPool();
+    const r = await pool.request().query(`
+      SELECT v.id_libro, l.titulo, l.autor, v.nro_ejemplar, v.estado
+      FROM V_EJEMPLAR_Operacion_Global v
+      JOIN LIBRO l ON l.id_libro = v.id_libro
+      WHERE v.id_sede = ${OTRA_SEDE} AND v.estado = 'DISPONIBLE'
+      ORDER BY l.titulo, v.nro_ejemplar
+    `);
+    res.json(r.recordset);
+  } catch (err) {
+    console.error('Error disponibilidad-remota:', err.message);
+    res.status(500).json({ error: 'Error de base de datos', detalle: err.message });
+  }
+});
+
+
+router.get('/actividad', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const r = await pool.request().query(`
+      SELECT TOP 6 id_prestamo, fecha_prestamo, estado, tipo_prestamo,
+             id_libro, nro_ejemplar, id_sede_origen
+      FROM ${T.prestamo} ORDER BY id_prestamo DESC;
+
+      SELECT TOP 3 id_estudiante, nombre FROM ${T.estudiante} ORDER BY id_estudiante DESC;
+
+      SELECT TOP 3 id_libro, titulo FROM LIBRO ORDER BY id_libro DESC;
+    `);
+    res.json({
+      prestamos:   r.recordsets[0],
+      estudiantes: r.recordsets[1],
+      libros:      r.recordsets[2]
+    });
+  } catch (err) {
+    console.error('Error actividad:', err.message);
+    res.status(500).json({ error: 'Error de base de datos', detalle: err.message });
+  }
+});
+
+router.get('/nodo', (req, res) => {
+  res.json({ sede: NODO_SEDE, nombre: esQuito ? 'Quito' : 'Guayaquil' });
+});
+
 module.exports = router;
