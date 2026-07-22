@@ -10,9 +10,9 @@ const esQuito = NODO_SEDE === 1;
 
 // Nombres de tabla según el nodo (Quito sin sufijo, Guayaquil con sufijo _Guayaquil).
 const T = {
-  operacion:  esQuito ? 'EJEMPLAR_Operacion' : 'EJEMPLAR_Operacion_Guayaquil',
-  estudiante: esQuito ? 'ESTUDIANTE'         : 'ESTUDIANTE_Guayaquil',
-  prestamo:   esQuito ? 'PRESTAMO'           : 'PRESTAMO_Guayaquil',
+  operacion:  esQuito ? 'EJEMPLAR_Operacion_Quito' : 'EJEMPLAR_Operacion_Guayaquil',
+  estudiante: esQuito ? 'ESTUDIANTE_Quito'         : 'ESTUDIANTE_Guayaquil',
+  prestamo:   esQuito ? 'PRESTAMO_Quito'           : 'PRESTAMO_Guayaquil',
 };
 
 // Ruta a la identificacion (vertical, centralizada en Quito):
