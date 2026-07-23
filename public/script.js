@@ -632,7 +632,7 @@ async function eliminarEjemplar() {
 
 async function consultaRemota() {
   const otraSede = otherNode();
-  let tablaRemota, auditMetrics, validationTable;
+  let tablaRemota;
 
   // 1) Disponibilidad remota (necesita el otro nodo en linea)
   try {
@@ -645,28 +645,6 @@ async function consultaRemota() {
     tablaRemota = errorBox('No se pudo consultar la sede ' + otraSede + '. Verifica que su nodo esté en línea.');
   }
 
-  // 2) Verificacion del sistema (local, siempre disponible)
-  try {
-    const a = await apiGet('/auditoria');
-    const ok = (n) => n === 0;
-    const catalogoOk = a.total_sedes > 0 && a.total_libros > 0;
-    auditMetrics = `
-      <div class="audit-metrics">
-        ${metric('Estudiantes fuera de sede', a.estudiantes_fuera, ok(a.estudiantes_fuera) ? 'Sin inconsistencias' : 'Revisar')}
-        ${metric('Ejemplares fuera de sede', a.ejemplares_fuera, ok(a.ejemplares_fuera) ? 'Operación correcta' : 'Revisar')}
-        ${metric('Préstamos fuera de regla', a.prestamos_fuera, ok(a.prestamos_fuera) ? 'Origen validado' : 'Revisar')}
-        ${metric('Catálogo compartido', catalogoOk ? 'Correcto' : 'Vacío', 'Sedes y libros')}
-      </div>`;
-    validationTable = table(['Validación','Resultado','Detalle','Estado'], [
-      ['Estudiantes por sede', ok(a.estudiantes_fuera)?'Correcto':'Inconsistente','No existen estudiantes asignados a una sede incorrecta', chip(ok(a.estudiantes_fuera)?'Aprobado':'Revisar')],
-      ['Ejemplares operativos', ok(a.ejemplares_fuera)?'Correcto':'Inconsistente','Los ejemplares corresponden a su sede de operación', chip(ok(a.ejemplares_fuera)?'Aprobado':'Revisar')],
-      ['Préstamos', ok(a.prestamos_fuera)?'Correcto':'Inconsistente','Los préstamos se registran en la sede del estudiante solicitante', chip(ok(a.prestamos_fuera)?'Aprobado':'Revisar')],
-      ['Catálogo compartido', catalogoOk?'Correcto':'Vacío','La información de sedes y libros está disponible para consulta', chip('Aprobado')]
-    ]);
-  } catch (err) {
-    auditMetrics = errorBox('No se pudo calcular la verificación del sistema.');
-    validationTable = '';
-  }
 
   const content = `
     ${pageHeader('', 'Disponibilidad', 'Ejemplares disponibles en la sede ' + otraSede + ' que pueden solicitarse en préstamo.')}
@@ -678,9 +656,6 @@ async function consultaRemota() {
         </div>
         ${tablaRemota}
 
-        <div class="section-title" style="margin-top:18px">Verificación del sistema</div>
-        ${auditMetrics}
-        ${validationTable}
       </div>
     </div>`;
   return shell(content, 'consulta-remota');

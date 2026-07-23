@@ -61,7 +61,7 @@ router.get('/libros', (req, res) =>
   consultar(res, 'SELECT id_libro, titulo, autor, categoria FROM LIBRO ORDER BY id_libro'));
 
 router.get('/estudiantes', (req, res) =>
-  consultar(res, `SELECT id_estudiante, nombre, carrera, correo, id_sede FROM V_ESTUDIANTE_Global  WHERE id_sede = ${NODO_SEDE} ORDER BY id_estudiante`));
+  consultar(res, `SELECT id_estudiante, nombre, carrera, correo, id_sede FROM V_ESTUDIANTE_Global WHERE id_sede = ${NODO_SEDE} ORDER BY id_estudiante`));
 
 router.get('/ejemplares-operacion', (req, res) =>
   consultar(res, `SELECT id_libro, nro_ejemplar, id_sede, estado FROM V_EJEMPLAR_Operacion_Global WHERE id_sede = ${NODO_SEDE} ORDER BY id_libro, nro_ejemplar`));
