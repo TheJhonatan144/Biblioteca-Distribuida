@@ -21,6 +21,11 @@ const RUTA_IDENT = esQuito
   ? 'Biblioteca_Quito.dbo.EJEMPLAR_Identificacion'
   : 'JHONATAN.Biblioteca_Quito.dbo.EJEMPLAR_Identificacion';
 
+// Semilla para calcular el siguiente id local (las tablas ya no usan IDENTITY):
+//   Quito     -> impares: ISNULL(MAX, -1) + 2  => 1, 3, 5...
+//   Guayaquil -> pares:   ISNULL(MAX,  0) + 2  => 2, 4, 6...
+const SEMILLA = esQuito ? -1 : 0;
+
 // Helper: ejecuta una consulta y devuelve el arreglo de filas como JSON.
 async function consultar(res, sqlText) {
   try {
@@ -232,44 +237,66 @@ router.delete('/sedes', async (req, res) => {
 });
 
 // ===== CRUD de ESTUDIANTE (fragmentación horizontal, local al nodo) =====
+// CREAR estudiante: el id se calcula respetando la paridad del nodo y la
+// insercion se realiza A TRAVES DE LA VISTA PARTICIONADA (transaccion distribuida).
 router.post('/estudiantes', async (req, res) => {
   const { nombre, carrera, correo } = req.body;
+  if (!nombre) return res.status(400).json({ error: 'El nombre es obligatorio.' });
   try {
     const pool = await getPool();
     const r = await pool.request()
-      .input('nombre', sql.VarChar(150), nombre)
-      .input('carrera', sql.VarChar(150), carrera)
-      .input('correo', sql.VarChar(150), correo)
-      .input('id_sede', sql.Int, NODO_SEDE)
-      .query(`INSERT INTO ${T.estudiante} (nombre, carrera, correo, id_sede)
-              OUTPUT INSERTED.id_estudiante
-              VALUES (@nombre, @carrera, @correo, @id_sede)`);
+      .input('nombre', sql.VarChar(120), nombre)
+      .input('carrera', sql.VarChar(120), carrera)
+      .input('correo', sql.VarChar(120), correo)
+      .query(`
+        SET XACT_ABORT ON;
+        BEGIN DISTRIBUTED TRANSACTION;
+          DECLARE @id INT = (SELECT ISNULL(MAX(id_estudiante), ${SEMILLA}) + 2 FROM ${T.estudiante});
+          INSERT INTO V_ESTUDIANTE_Global (id_estudiante, nombre, carrera, correo, id_sede)
+          VALUES (@id, @nombre, @carrera, @correo, ${NODO_SEDE});
+          SELECT @id AS id_estudiante;
+        COMMIT TRANSACTION;
+      `);
     res.json({ ok: true, id_estudiante: r.recordset[0].id_estudiante });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ACTUALIZAR estudiante a traves de la VISTA PARTICIONADA.
 router.put('/estudiantes', async (req, res) => {
   const { id_estudiante, nombre, carrera, correo } = req.body;
   try {
     const pool = await getPool();
     const r = await pool.request()
       .input('id_estudiante', sql.Int, id_estudiante)
-      .input('nombre', sql.VarChar(150), nombre)
-      .input('carrera', sql.VarChar(150), carrera)
-      .input('correo', sql.VarChar(150), correo)
-      .query(`UPDATE ${T.estudiante} SET nombre=@nombre, carrera=@carrera, correo=@correo
-              WHERE id_estudiante=@id_estudiante`);
+      .input('nombre', sql.VarChar(120), nombre)
+      .input('carrera', sql.VarChar(120), carrera)
+      .input('correo', sql.VarChar(120), correo)
+      .query(`
+        SET XACT_ABORT ON;
+        BEGIN DISTRIBUTED TRANSACTION;
+          UPDATE V_ESTUDIANTE_Global
+          SET nombre = @nombre, carrera = @carrera, correo = @correo
+          WHERE id_estudiante = @id_estudiante AND id_sede = ${NODO_SEDE};
+        COMMIT TRANSACTION;
+      `);
     res.json({ ok: true, filas: r.rowsAffected[0] });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ELIMINAR estudiante a traves de la VISTA PARTICIONADA.
 router.delete('/estudiantes', async (req, res) => {
   const { id_estudiante } = req.body;
   try {
     const pool = await getPool();
     const r = await pool.request()
       .input('id_estudiante', sql.Int, id_estudiante)
-      .query(`DELETE FROM ${T.estudiante} WHERE id_estudiante=@id_estudiante`);
+      .query(`
+        SET XACT_ABORT ON;
+        BEGIN DISTRIBUTED TRANSACTION;
+          DELETE FROM V_ESTUDIANTE_Global
+          WHERE id_estudiante = @id_estudiante AND id_sede = ${NODO_SEDE};
+        COMMIT TRANSACTION;
+      `);
     res.json({ ok: true, filas: r.rowsAffected[0] });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -427,13 +454,16 @@ router.post('/prestamos', async (req, res) => {
         IF @@ROWCOUNT = 0
             THROW 50001, 'El ejemplar no existe en esa sede o no esta DISPONIBLE.', 1;
 
-        INSERT INTO ${T.prestamo}
-          (fecha_prestamo, fecha_devolucion, estado, tipo_prestamo,
+        DECLARE @idp INT = (SELECT ISNULL(MAX(id_prestamo), ${SEMILLA}) + 2 FROM ${T.prestamo});
+
+        INSERT INTO V_PRESTAMO_Global
+          (id_prestamo, fecha_prestamo, fecha_devolucion, estado, tipo_prestamo,
            id_estudiante, id_libro, nro_ejemplar, id_sede_origen, id_sede_proveedora)
-        OUTPUT INSERTED.id_prestamo
         VALUES
-          (GETDATE(), COALESCE(TRY_CONVERT(date, @fdev), DATEADD(day, 7, GETDATE())),
+          (@idp, GETDATE(), COALESCE(TRY_CONVERT(date, @fdev), DATEADD(day, 7, GETDATE())),
            'ACTIVO', @tipo, @ie, @il, @ne, ${NODO_SEDE}, @prov);
+
+        SELECT @idp AS id_prestamo;
 
       COMMIT TRANSACTION;
     `);
