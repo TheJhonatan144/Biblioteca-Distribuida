@@ -61,15 +61,15 @@ router.get('/libros', (req, res) =>
   consultar(res, 'SELECT id_libro, titulo, autor, categoria FROM LIBRO ORDER BY id_libro'));
 
 router.get('/estudiantes', (req, res) =>
-  consultar(res, `SELECT id_estudiante, nombre, carrera, correo, id_sede FROM ${T.estudiante} ORDER BY id_estudiante`));
+  consultar(res, `SELECT id_estudiante, nombre, carrera, correo, id_sede FROM V_ESTUDIANTE_Global  WHERE id_sede = ${NODO_SEDE} ORDER BY id_estudiante`));
 
 router.get('/ejemplares-operacion', (req, res) =>
-  consultar(res, `SELECT id_libro, nro_ejemplar, id_sede, estado FROM ${T.operacion} ORDER BY id_libro, nro_ejemplar`));
+  consultar(res, `SELECT id_libro, nro_ejemplar, id_sede, estado FROM V_EJEMPLAR_Operacion_Global WHERE id_sede = ${NODO_SEDE} ORDER BY id_libro, nro_ejemplar`));
 
 router.get('/prestamos', (req, res) =>
   consultar(res, `SELECT id_prestamo, fecha_prestamo, fecha_devolucion, estado, tipo_prestamo,
                          id_estudiante, id_libro, nro_ejemplar, id_sede_origen, id_sede_proveedora
-                  FROM ${T.prestamo} ORDER BY id_prestamo`));
+                  FROM V_PRESTAMO_Global WHERE id_sede_origen = ${NODO_SEDE} ORDER BY id_prestamo`));
 
 // EJEMPLAR_Identificacion está centralizada en Quito. En Guayaquil devuelve vacío.
 router.get('/ejemplares-identificacion', (req, res) => {
@@ -84,9 +84,9 @@ router.get('/dashboard', async (req, res) => {
     const result = await pool.request().query(`
       SELECT
         (SELECT COUNT(*) FROM LIBRO)                                     AS libros,
-        (SELECT COUNT(*) FROM ${T.estudiante})                          AS estudiantes,
-        (SELECT COUNT(*) FROM ${T.operacion} WHERE estado='DISPONIBLE') AS ejemplares_disponibles,
-        (SELECT COUNT(*) FROM ${T.prestamo}  WHERE estado='ACTIVO')     AS prestamos_activos
+        (SELECT COUNT(*) FROM V_ESTUDIANTE_Global WHERE id_sede = ${NODO_SEDE})                              AS estudiantes,
+        (SELECT COUNT(*) FROM V_EJEMPLAR_Operacion_Global WHERE id_sede = ${NODO_SEDE} AND estado='DISPONIBLE') AS ejemplares_disponibles,
+        (SELECT COUNT(*) FROM V_PRESTAMO_Global WHERE id_sede_origen = ${NODO_SEDE} AND estado='ACTIVO')        AS prestamos_activos
     `);
     res.json(result.recordset[0]);
   } catch (err) {
@@ -101,9 +101,9 @@ router.get('/auditoria', async (req, res) => {
     const pool = await getPool();
     const result = await pool.request().query(`
       SELECT
-        (SELECT COUNT(*) FROM ${T.estudiante} WHERE id_sede <> ${NODO_SEDE})       AS estudiantes_fuera,
-        (SELECT COUNT(*) FROM ${T.operacion}  WHERE id_sede <> ${NODO_SEDE})       AS ejemplares_fuera,
-        (SELECT COUNT(*) FROM ${T.prestamo}   WHERE id_sede_origen <> ${NODO_SEDE}) AS prestamos_fuera,
+        (SELECT COUNT(*) FROM V_ESTUDIANTE_Global WHERE id_sede = ${NODO_SEDE} AND id_sede <> ${NODO_SEDE})       AS estudiantes_fuera,
+        (SELECT COUNT(*) FROM V_EJEMPLAR_Operacion_Global WHERE id_sede = ${NODO_SEDE} AND id_sede <> ${NODO_SEDE}) AS ejemplares_fuera,
+        (SELECT COUNT(*) FROM V_PRESTAMO_Global WHERE id_sede_origen = ${NODO_SEDE} AND id_sede_origen <> ${NODO_SEDE}) AS prestamos_fuera,
         (SELECT COUNT(*) FROM SEDE)                                                AS total_sedes,
         (SELECT COUNT(*) FROM LIBRO)                                               AS total_libros
     `);
@@ -536,9 +536,9 @@ router.get('/actividad', async (req, res) => {
     const r = await pool.request().query(`
       SELECT TOP 6 id_prestamo, fecha_prestamo, estado, tipo_prestamo,
              id_libro, nro_ejemplar, id_sede_origen
-      FROM ${T.prestamo} ORDER BY id_prestamo DESC;
+      FROM V_PRESTAMO_Global WHERE id_sede_origen = ${NODO_SEDE} ORDER BY id_prestamo DESC;
 
-      SELECT TOP 3 id_estudiante, nombre FROM ${T.estudiante} ORDER BY id_estudiante DESC;
+      SELECT TOP 3 id_estudiante, nombre FROM V_ESTUDIANTE_Global WHERE id_sede = ${NODO_SEDE} ORDER BY id_estudiante DESC;
 
       SELECT TOP 3 id_libro, titulo FROM LIBRO ORDER BY id_libro DESC;
     `);
